@@ -1,13 +1,14 @@
-/* Shared Flood design tokens — imported after `@import "tailwindcss"` in each app. */
+/* Shared Flood design tokens — imported after `@import "tailwindcss"` in each app.
+   Dark theme: matte black / space grey surfaces (neutral zinc). Brand blues unchanged. */
 
 :root {
-  --background: #f0f4ff;
+  --background: #fafafa;
   --foreground: #1e293b;
 }
 
 html.dark {
-  --background: #0f172a;
-  --foreground: #e2e8f0;
+  --background: #0a0a0b;
+  --foreground: #fafafa;
 }
 
 @theme inline {
@@ -33,28 +34,29 @@ html.dark {
   --color-purple: #a855f7;
   --color-primary-red: #dc2626;
 
-  --color-dark-bg: #060d1a;
-  --color-dark-card: #0d1f3d;
-  --color-dark-card-alt: #0f2347;
-  --color-dark-border: #1e3a5f;
-  --color-dark-text: #e8edf5;
-  --color-dark-text-secondary: #8899b8;
-  --color-dark-text-muted: #8899b8;
-  --color-dark-input-bg: #0a1628;
+  /* Dark surfaces — neutral zinc / matte (no navy blue cast) */
+  --color-dark-bg: #0a0a0b;
+  --color-dark-card: #161618;
+  --color-dark-card-alt: #1e1e21;
+  --color-dark-border: #2e2e33;
+  --color-dark-text: #fafafa;
+  --color-dark-text-secondary: #a1a1aa;
+  --color-dark-text-muted: #71717a;
+  --color-dark-input-bg: #121214;
 
   /* Community + charts */
   --color-brand: #1d4ed8;
   --color-brand-dark: #1e40af;
   --color-brand-light: #dbeafe;
   --color-upvote: #2563eb;
-  --color-bg: #eef2ff;
+  --color-bg: #f4f4f5;
   --color-card: #ffffff;
-  --color-border: #e2e8f0;
+  --color-border: #e4e4e7;
   --color-text: #1e293b;
   --color-muted: #64748b;
-  --color-pill-bg: #f1f5f9;
-  --color-hover: #eff6ff;
-  --color-input-bg: #f8fafc;
+  --color-pill-bg: #f4f4f5;
+  --color-hover: #e4e4e7;
+  --color-input-bg: #fafafa;
 
   --color-chart-grid: #e5e5e5;
   --color-chart-text: #4e4b4b;
@@ -70,14 +72,14 @@ html.dark {
   --color-navy: #1e3a8a;
   --color-teal: #0891b2;
   --color-upvote: #2563eb;
-  --color-bg: #eef2ff;
+  --color-bg: #f4f4f5;
   --color-card: #ffffff;
-  --color-border: #e2e8f0;
+  --color-border: #e4e4e7;
   --color-text: #1e293b;
   --color-muted: #64748b;
-  --color-pill-bg: #f1f5f9;
-  --color-hover: #eff6ff;
-  --color-input-bg: #f8fafc;
+  --color-pill-bg: #f4f4f5;
+  --color-hover: #e4e4e7;
+  --color-input-bg: #fafafa;
   --color-chart-grid: #e5e5e5;
   --color-chart-text: #4e4b4b;
 }
@@ -90,9 +92,9 @@ html.dark {
   --color-muted: var(--color-dark-text-muted);
   --color-input-bg: var(--color-dark-input-bg);
   --color-pill-bg: var(--color-dark-card-alt);
-  --color-hover: rgba(29, 78, 216, 0.15);
-  --color-chart-grid: #2d3a5a;
-  --color-chart-text: #a0a0a0;
+  --color-hover: rgba(255, 255, 255, 0.07);
+  --color-chart-grid: #27272a;
+  --color-chart-text: #a1a1aa;
 }
 
 /* CRM legacy alias → canonical */
