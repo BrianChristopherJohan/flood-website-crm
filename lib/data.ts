@@ -51,10 +51,10 @@ export const statusToneMap: Record<
     dot: "bg-status-warning-2",
   },
   Danger: {
-    bg: "bg-light-blue",
-    text: "text-primary-blue",
-    border: "border-primary-blue/50",
-    dot: "bg-primary-blue",
+    bg: "bg-status-danger/15",
+    text: "text-status-danger",
+    border: "border-status-danger/30",
+    dot: "bg-status-danger",
   },
 };
 
@@ -89,7 +89,7 @@ export const statusLegend = [
   {
     label: "Danger" as NodeStatus,
     description: "Water Level 3",
-    color: "bg-light-blue text-primary-blue",
+    color: "bg-status-danger/15 text-status-danger",
     water_level: 3,
   },
 ];

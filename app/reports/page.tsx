@@ -106,11 +106,11 @@ export default function ReportsPage() {
     }
   }
 
-  const bg    = isDark ? "bg-gray-900 text-gray-100" : "bg-gray-50 text-gray-900";
-  const card  = isDark ? "bg-gray-800 border-gray-700" : "bg-white border-gray-200";
-  const muted = isDark ? "text-gray-400" : "text-gray-500";
-  const th    = isDark ? "bg-gray-750 text-gray-300 border-gray-700" : "bg-gray-50 text-gray-600 border-gray-200";
-  const sel   = isDark ? "bg-gray-700 border-gray-600 text-gray-100" : "bg-white border-gray-300 text-gray-900";
+  const bg    = "bg-[var(--color-bg)] text-[var(--color-text)]";
+  const card  = "bg-[var(--color-card)] border-[var(--color-border)]";
+  const muted = "text-[var(--color-muted)]";
+  const th    = "bg-[var(--color-pill-bg)] text-[var(--color-muted)] border-[var(--color-border)]";
+  const sel   = "bg-[var(--color-input-bg)] border-[var(--color-border)] text-[var(--color-text)]";
 
   const pending  = reports.filter((r) => r.status === "pending").length;
   const resolved = reports.filter((r) => r.status === "resolved").length;

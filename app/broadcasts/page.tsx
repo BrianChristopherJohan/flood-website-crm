@@ -137,11 +137,11 @@ export default function BroadcastsPage() {
     }
   }
 
-  const bg    = isDark ? "bg-gray-900 text-gray-100" : "bg-gray-50 text-gray-900";
-  const card  = isDark ? "bg-gray-800 border-gray-700" : "bg-white border-gray-200";
-  const input = isDark ? "bg-gray-700 border-gray-600 text-gray-100 placeholder-gray-400" : "bg-white border-gray-300 text-gray-900 placeholder-gray-400";
-  const label = isDark ? "text-gray-300" : "text-gray-700";
-  const muted = isDark ? "text-gray-400" : "text-gray-500";
+  const bg    = "bg-[var(--color-bg)] text-[var(--color-text)]";
+  const card  = "bg-[var(--color-card)] border-[var(--color-border)]";
+  const input = "bg-[var(--color-input-bg)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-muted)]";
+  const label = "text-[var(--color-text)]";
+  const muted = "text-[var(--color-muted)]";
 
   return (
     <div className={`min-h-screen p-6 ${bg}`}>
@@ -294,7 +294,7 @@ export default function BroadcastsPage() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="confirm-broadcast-title"
-            className={`w-full max-w-md rounded-2xl p-6 shadow-xl ${isDark ? "bg-gray-800 text-gray-100" : "bg-white text-gray-900"}`}
+            className="w-full max-w-md rounded-2xl p-6 shadow-xl bg-[var(--color-card)] text-[var(--color-text)]"
           >
             <h2 id="confirm-broadcast-title" className="mb-1 text-lg font-bold">
               Confirm Broadcast
@@ -304,7 +304,7 @@ export default function BroadcastsPage() {
               <strong>cannot be recalled</strong>.
             </p>
 
-            <div className={`mb-6 space-y-3 rounded-xl border p-4 ${isDark ? "border-gray-600 bg-gray-700/60" : "border-gray-200 bg-gray-50"}`}>
+            <div className="mb-6 space-y-3 rounded-xl border p-4 border-[var(--color-border)] bg-[var(--color-pill-bg)]">
               <div className="flex flex-wrap items-center gap-2">
                 <span
                   className={`rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${
@@ -316,7 +316,7 @@ export default function BroadcastsPage() {
                 <span className="text-sm font-semibold">{form.title}</span>
               </div>
               <p className={`text-sm leading-relaxed ${muted}`}>{form.body}</p>
-              <div className={`flex flex-wrap items-center gap-4 border-t pt-2 text-xs ${isDark ? "border-gray-600 text-gray-400" : "border-gray-200 text-gray-500"}`}>
+              <div className="flex flex-wrap items-center gap-4 border-t pt-2 text-xs border-[var(--color-border)] text-[var(--color-muted)]">
                 <span>
                   Zone: <strong>{form.targetZone || "all"}</strong>
                 </span>
@@ -339,11 +339,7 @@ export default function BroadcastsPage() {
               <button
                 type="button"
                 onClick={() => setConfirmOpen(false)}
-                className={`flex-1 rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors ${
-                  isDark
-                    ? "border-gray-600 text-gray-300 hover:bg-gray-700"
-                    : "border-gray-300 text-gray-700 hover:bg-gray-50"
-                }`}
+                className="flex-1 rounded-lg border px-4 py-2.5 text-sm font-semibold transition-colors border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-hover)]"
               >
                 Cancel
               </button>

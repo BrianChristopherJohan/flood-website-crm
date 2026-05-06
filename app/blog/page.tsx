@@ -74,13 +74,13 @@ function readingTime(body: string): string {
 
 function categoryColor(cat: string): { bg: string; text: string } {
   switch (cat) {
-    case "General": return { bg: "bg-gray-100 dark:bg-gray-700", text: "text-gray-700 dark:text-gray-300" };
+    case "General":     return { bg: "bg-gray-100 dark:bg-[var(--color-dark-card-alt)]",       text: "text-gray-700 dark:text-[var(--color-dark-text-secondary)]" };
     case "Flood Alert": return { bg: "bg-blue-100 dark:bg-blue-900/30",    text: "text-blue-700 dark:text-blue-400" };
     case "Safety Tips": return { bg: "bg-amber-100 dark:bg-amber-900/30", text: "text-amber-700 dark:text-amber-400" };
     case "Community":   return { bg: "bg-purple-100 dark:bg-purple-900/30", text: "text-purple-700 dark:text-purple-400" };
     case "Updates":     return { bg: "bg-blue-100 dark:bg-blue-900/30",   text: "text-blue-700 dark:text-blue-400" };
     case "Research":    return { bg: "bg-emerald-100 dark:bg-emerald-900/30", text: "text-emerald-700 dark:text-emerald-400" };
-    default:            return { bg: "bg-gray-100 dark:bg-gray-700",      text: "text-gray-700 dark:text-gray-300" };
+    default:            return { bg: "bg-gray-100 dark:bg-[var(--color-dark-card-alt)]",      text: "text-gray-700 dark:text-[var(--color-dark-text-secondary)]" };
   }
 }
 
@@ -117,7 +117,6 @@ function BlogFormModal({
   onClose: () => void;
   onSave: (form: BlogForm) => Promise<void>;
 }) {
-  const { isDark } = useTheme();
   const [form, setForm] = useState<BlogForm>(initial);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -130,7 +129,6 @@ function BlogFormModal({
   const handleSave = async () => {
     if (!form.title.trim()) { setError("Title is required."); return; }
     if (!form.body.trim())  { setError("Content is required."); return; }
-    // FEAT-S4-02: validate image URL format if provided
     if (form.imageUrl.trim()) {
       try { new URL(form.imageUrl.trim()); }
       catch { setError("Image URL must be a valid URL (e.g. https://…)."); return; }
@@ -150,15 +148,15 @@ function BlogFormModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className={`w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl ${isDark ? "bg-gray-900" : "bg-white"}`}>
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl bg-[var(--color-card)]">
 
         {/* Modal header */}
-        <div className={`flex items-center justify-between p-6 border-b ${isDark ? "border-gray-700" : "border-gray-200"}`}>
-          <h2 className={`text-xl font-bold ${isDark ? "text-white" : "text-gray-900"}`}>
+        <div className="flex items-center justify-between p-6 border-b border-[var(--color-border)]">
+          <h2 className="text-xl font-bold text-[var(--color-text)]">
             {initial.title ? "Edit Article" : "New Article"}
           </h2>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-[var(--color-hover)] transition">
+            <svg className="w-5 h-5 text-[var(--color-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -174,7 +172,7 @@ function BlogFormModal({
 
           {/* Title */}
           <div>
-            <label className={`block text-sm font-semibold mb-1.5 ${isDark ? "text-gray-300" : "text-gray-700"}`}>
+            <label className="block text-sm font-semibold mb-1.5 text-[var(--color-text)]">
               Title <span className="text-red-500">*</span>
             </label>
             <input
@@ -182,15 +180,13 @@ function BlogFormModal({
               value={form.title}
               onChange={e => set("title", e.target.value)}
               placeholder="Enter article title..."
-              className={`w-full rounded-lg border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                isDark ? "bg-gray-800 border-gray-600 text-white" : "bg-white border-gray-300 text-gray-900"
-              }`}
+              className="w-full rounded-lg border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-[var(--color-input-bg)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-muted)]"
             />
           </div>
 
           {/* Category */}
           <div>
-            <label className={`block text-sm font-semibold mb-1.5 ${isDark ? "text-gray-300" : "text-gray-700"}`}>Category</label>
+            <label className="block text-sm font-semibold mb-1.5 text-[var(--color-text)]">Category</label>
             <div className="flex flex-wrap gap-2">
               {CATEGORIES.map(cat => (
                 <button
@@ -199,9 +195,7 @@ function BlogFormModal({
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${
                     form.category === cat
                       ? "bg-blue-600 text-white border-blue-600"
-                      : isDark
-                        ? "border-gray-600 text-gray-400 hover:border-gray-400"
-                        : "border-gray-300 text-gray-600 hover:border-gray-400"
+                      : "border-[var(--color-border)] text-[var(--color-muted)] hover:border-[var(--color-dark-text-secondary)]"
                   }`}
                 >
                   {cat}
@@ -212,29 +206,27 @@ function BlogFormModal({
 
           {/* Image URL */}
           <div>
-            <label className={`block text-sm font-semibold mb-1.5 ${isDark ? "text-gray-300" : "text-gray-700"}`}>
-              Image URL <span className="text-xs font-normal text-gray-400">(optional)</span>
+            <label className="block text-sm font-semibold mb-1.5 text-[var(--color-text)]">
+              Image URL <span className="text-xs font-normal text-[var(--color-muted)]">(optional)</span>
             </label>
             <input
               type="url"
               value={form.imageUrl}
               onChange={e => set("imageUrl", e.target.value)}
               placeholder="https://example.com/image.jpg"
-              className={`w-full rounded-lg border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                isDark ? "bg-gray-800 border-gray-600 text-white" : "bg-white border-gray-300 text-gray-900"
-              }`}
+              className="w-full rounded-lg border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-[var(--color-input-bg)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-muted)]"
             />
           </div>
 
           {/* Featured toggle */}
-          <div className={`flex items-center justify-between p-4 rounded-lg border ${isDark ? "border-gray-700 bg-gray-800/50" : "border-gray-200 bg-gray-50"}`}>
+          <div className="flex items-center justify-between p-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-pill-bg)]">
             <div>
-              <p className={`text-sm font-semibold ${isDark ? "text-gray-200" : "text-gray-800"}`}>Featured Article</p>
-              <p className="text-xs text-gray-500 mt-0.5">Show this article in the Featured section</p>
+              <p className="text-sm font-semibold text-[var(--color-text)]">Featured Article</p>
+              <p className="text-xs text-[var(--color-muted)] mt-0.5">Show this article in the Featured section</p>
             </div>
             <button
               onClick={() => set("isFeatured", !form.isFeatured)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.isFeatured ? "bg-blue-600" : isDark ? "bg-gray-600" : "bg-gray-300"}`}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.isFeatured ? "bg-blue-600" : "bg-[var(--color-dark-border)]"}`}
             >
               <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${form.isFeatured ? "translate-x-6" : "translate-x-1"}`} />
             </button>
@@ -242,7 +234,7 @@ function BlogFormModal({
 
           {/* Body */}
           <div>
-            <label className={`block text-sm font-semibold mb-1.5 ${isDark ? "text-gray-300" : "text-gray-700"}`}>
+            <label className="block text-sm font-semibold mb-1.5 text-[var(--color-text)]">
               Content <span className="text-red-500">*</span>
             </label>
             <textarea
@@ -250,19 +242,17 @@ function BlogFormModal({
               onChange={e => set("body", e.target.value)}
               rows={10}
               placeholder={"Write your article content here...\n\nUse double line breaks to separate paragraphs.\nUse **Heading** for section headings."}
-              className={`w-full rounded-lg border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none ${
-                isDark ? "bg-gray-800 border-gray-600 text-white" : "bg-white border-gray-300 text-gray-900"
-              }`}
+              className="w-full rounded-lg border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none bg-[var(--color-input-bg)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-muted)]"
             />
-            <p className="text-xs text-gray-400 mt-1">{(form.body.trim().split(/\s+/).filter(Boolean).length)} words · {readingTime(form.body)}</p>
+            <p className="text-xs text-[var(--color-muted)] mt-1">{(form.body.trim().split(/\s+/).filter(Boolean).length)} words · {readingTime(form.body)}</p>
           </div>
         </div>
 
         {/* Modal footer */}
-        <div className={`flex items-center justify-end gap-3 p-6 border-t ${isDark ? "border-gray-700" : "border-gray-200"}`}>
+        <div className="flex items-center justify-end gap-3 p-6 border-t border-[var(--color-border)]">
           <button
             onClick={onClose}
-            className={`px-5 py-2 rounded-lg text-sm font-semibold transition ${isDark ? "bg-gray-700 text-gray-300 hover:bg-gray-600" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
+            className="px-5 py-2 rounded-lg text-sm font-semibold transition bg-[var(--color-dark-card-alt)] text-[var(--color-dark-text-secondary)] hover:bg-[var(--color-dark-border)]"
           >
             Cancel
           </button>
@@ -293,22 +283,21 @@ function BlogCard({
   onDelete: (blog: BlogDto) => void;
   onToggle: (blog: BlogDto) => void;
 }) {
-  const { isDark } = useTheme();
   const [deleting, setDeleting] = useState(false);
 
   return (
-    <div className={`rounded-xl border overflow-hidden transition hover:shadow-md ${isDark ? "bg-gray-800 border-gray-700" : "bg-white border-gray-200"}`}>
+    <div className="rounded-xl border overflow-hidden transition hover:shadow-md bg-[var(--color-card)] border-[var(--color-border)]">
       <div className="flex">
         {/* Thumbnail */}
-        <div className={`w-36 shrink-0 ${isDark ? "bg-gray-700" : "bg-gray-100"} flex items-center justify-center`}>
+        <div className="w-36 shrink-0 bg-[var(--color-pill-bg)] flex items-center justify-center">
           {blog.imageUrl ? (
             <img src={blog.imageUrl} alt="" className="w-full h-full object-cover" />
           ) : (
             <div className="flex flex-col items-center gap-1 p-4">
-              <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className="w-8 h-8 text-[var(--color-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
-              <span className="text-xs text-gray-400">{blog.imageKey}</span>
+              <span className="text-xs text-[var(--color-muted)]">{blog.imageKey}</span>
             </div>
           )}
         </div>
@@ -324,18 +313,18 @@ function BlogCard({
                 </span>
               )}
             </div>
-            <span className={`text-xs shrink-0 ${isDark ? "text-gray-400" : "text-gray-400"}`}>{readingTime(blog.body)}</span>
+            <span className="text-xs shrink-0 text-[var(--color-muted)]">{readingTime(blog.body)}</span>
           </div>
 
-          <h3 className={`font-bold text-sm leading-snug line-clamp-2 ${isDark ? "text-white" : "text-gray-900"}`}>
+          <h3 className="font-bold text-sm leading-snug line-clamp-2 text-[var(--color-text)]">
             {blog.title}
           </h3>
 
-          <p className={`text-xs line-clamp-2 ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+          <p className="text-xs line-clamp-2 text-[var(--color-muted)]">
             {blog.body}
           </p>
 
-          <div className={`flex items-center gap-1 text-xs mt-auto ${isDark ? "text-gray-500" : "text-gray-400"}`}>
+          <div className="flex items-center gap-1 text-xs mt-auto text-[var(--color-muted)]">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
@@ -349,9 +338,7 @@ function BlogCard({
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
                 blog.isFeatured
                   ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
-                  : isDark
-                    ? "border-gray-600 text-gray-400 hover:bg-gray-700"
-                    : "border-gray-200 text-gray-600 hover:bg-gray-50"
+                  : "border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-hover)]"
               }`}
             >
               {blog.isFeatured ? "Unfeature" : "Feature"}
@@ -389,7 +376,6 @@ export default function BlogPage() {
   const [search, setSearch] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [editTarget, setEditTarget] = useState<BlogDto | null>(null);
-  // BUG-S4-05: inline delete confirmation replaces native confirm()
   const [deleteTarget, setDeleteTarget] = useState<BlogDto | null>(null);
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -442,7 +428,6 @@ export default function BlogPage() {
     if (filterCat !== "All" && !filterTabs.includes(filterCat)) setFilterCat("All");
   }, [filterTabs, filterCat]);
 
-  // Category already filtered server-side; only apply text search client-side
   const displayed = blogs.filter(b => {
     if (!search.trim()) return true;
     return (
@@ -483,7 +468,6 @@ export default function BlogPage() {
   };
 
   const handleDelete = async (blog: BlogDto) => {
-    // BUG-S4-05: two-step inline confirmation — first tap arms, second confirms
     if (deleteTarget?.id !== blog.id) { setDeleteTarget(blog); return; }
     setDeleteTarget(null);
     if (!accessToken) return;
@@ -517,7 +501,7 @@ export default function BlogPage() {
   const categoryCount = new Set(blogs.map(b => b.category)).size;
 
   return (
-    <div className={`min-h-screen p-6 ${isDark ? "bg-gray-950 text-white" : "bg-gray-50 text-gray-900"}`}>
+    <div className="min-h-screen p-6 bg-[var(--color-bg)] text-[var(--color-text)]">
       {/* Toast */}
       {toast && (
         <div className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-xl shadow-xl text-sm font-semibold transition-all ${toast.ok ? "bg-emerald-600 text-white" : "bg-red-600 text-white"}`}>
@@ -525,10 +509,10 @@ export default function BlogPage() {
         </div>
       )}
 
-      {/* BUG-S4-05 — inline delete confirmation bar */}
+      {/* Inline delete confirmation bar */}
       {deleteTarget && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 rounded-2xl bg-white border border-red-200 shadow-xl px-5 py-3 animate-in slide-in-from-bottom-4">
-          <span className="text-sm font-medium text-gray-700 max-w-xs truncate">
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 rounded-2xl bg-[var(--color-card)] border border-red-200 shadow-xl px-5 py-3 animate-in slide-in-from-bottom-4">
+          <span className="text-sm font-medium text-[var(--color-text)] max-w-xs truncate">
             Delete &ldquo;{deleteTarget.title}&rdquo;?
           </span>
           <button
@@ -541,7 +525,7 @@ export default function BlogPage() {
           <button
             type="button"
             onClick={() => setDeleteTarget(null)}
-            className="text-sm font-medium text-gray-400 hover:text-gray-600 transition-colors"
+            className="text-sm font-medium text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors"
           >
             Cancel
           </button>
@@ -551,8 +535,8 @@ export default function BlogPage() {
       {/* Page header */}
       <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className={`text-2xl font-bold ${isDark ? "text-white" : "text-gray-900"}`}>Blog Management</h1>
-          <p className={`text-sm mt-1 ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+          <h1 className="text-2xl font-bold text-[var(--color-text)]">Blog Management</h1>
+          <p className="text-sm mt-1 text-[var(--color-muted)]">
             Manage public blog articles and featured content
           </p>
         </div>
@@ -574,17 +558,17 @@ export default function BlogPage() {
           { label: "Featured",       value: featuredCount },
           { label: "Categories",     value: categoryCount },
         ].map(stat => (
-          <div key={stat.label} className={`rounded-xl border p-5 ${isDark ? "bg-gray-800 border-gray-700" : "bg-white border-gray-200"}`}>
-            <div className={`text-2xl font-bold ${isDark ? "text-white" : "text-gray-900"}`}>{stat.value}</div>
-            <div className={`text-xs mt-1 ${isDark ? "text-gray-400" : "text-gray-500"}`}>{stat.label}</div>
+          <div key={stat.label} className="rounded-xl border p-5 bg-[var(--color-card)] border-[var(--color-border)]">
+            <div className="text-2xl font-bold text-[var(--color-text)]">{stat.value}</div>
+            <div className="text-xs mt-1 text-[var(--color-muted)]">{stat.label}</div>
           </div>
         ))}
       </div>
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-3 mb-6">
-        <div className={`flex items-center gap-2 flex-1 rounded-xl border px-4 py-2.5 ${isDark ? "bg-gray-800 border-gray-700" : "bg-white border-gray-200"}`}>
-          <svg className="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="flex items-center gap-2 flex-1 rounded-xl border px-4 py-2.5 bg-[var(--color-card)] border-[var(--color-border)]">
+          <svg className="w-4 h-4 text-[var(--color-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
@@ -592,7 +576,7 @@ export default function BlogPage() {
             placeholder="Search articles..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className={`flex-1 text-sm bg-transparent outline-none ${isDark ? "text-white placeholder-gray-500" : "text-gray-900 placeholder-gray-400"}`}
+            className="flex-1 text-sm bg-transparent outline-none text-[var(--color-text)] placeholder:text-[var(--color-muted)]"
           />
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -603,9 +587,7 @@ export default function BlogPage() {
               className={`px-3 py-2 rounded-xl text-xs font-semibold transition ${
                 filterCat === cat
                   ? "bg-blue-600 text-white"
-                  : isDark
-                    ? "bg-gray-800 border border-gray-600 text-gray-400 hover:bg-gray-700"
-                    : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-50"
+                  : "bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-hover)]"
               }`}
             >
               {cat}
@@ -625,14 +607,14 @@ export default function BlogPage() {
           <button onClick={loadBlogs} className="mt-3 text-sm text-red-600 underline">Retry</button>
         </div>
       ) : displayed.length === 0 ? (
-        <div className={`rounded-xl border p-16 text-center ${isDark ? "border-gray-700 bg-gray-800/50" : "border-gray-200 bg-white"}`}>
+        <div className="rounded-xl border p-16 text-center border-[var(--color-border)] bg-[var(--color-card)]">
           <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400">
             <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
             </svg>
           </div>
-          <p className={`text-lg font-semibold ${isDark ? "text-gray-300" : "text-gray-600"}`}>No articles found</p>
-          <p className="text-sm text-gray-400 mt-1">
+          <p className="text-lg font-semibold text-[var(--color-text)]">No articles found</p>
+          <p className="text-sm text-[var(--color-muted)] mt-1">
             {blogs.length === 0 ? "Create your first article to get started." : "Try adjusting your filters."}
           </p>
           {blogs.length === 0 && (
@@ -646,7 +628,7 @@ export default function BlogPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          <p className={`text-sm ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+          <p className="text-sm text-[var(--color-muted)]">
             Showing {displayed.length} of {blogs.length} articles
           </p>
           {displayed.map(blog => (

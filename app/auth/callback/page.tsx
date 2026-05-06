@@ -48,7 +48,7 @@ function CallbackInner() {
   }, [params, router]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg)]">
       <div className="text-center">
         <div className="h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-blue-600 mx-auto mb-4" />
         <p className="text-sm text-gray-500">Setting up your session…</p>

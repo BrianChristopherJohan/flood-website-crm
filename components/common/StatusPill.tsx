@@ -28,10 +28,10 @@ const variantToneMap = {
     dot: "bg-status-warning-2",
   },
   red: {
-    bg: "bg-light-blue",
-    text: "text-primary-blue",
-    border: "border-primary-blue/30",
-    dot: "bg-primary-blue",
+    bg: "bg-status-danger/15",
+    text: "text-status-danger",
+    border: "border-status-danger/30",
+    dot: "bg-status-danger",
   },
 };
 

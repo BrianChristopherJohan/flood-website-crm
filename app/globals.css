@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import "../lib/theme/tokens.css";
 
+/* ── Tell Tailwind v4 to use .dark class for dark: variants ─────────── */
+@variant dark (&:where(.dark, .dark *));
+
 * {
   box-sizing: border-box;
 }
