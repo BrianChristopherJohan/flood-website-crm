@@ -18,8 +18,8 @@ export function useThemeTokens(): { chartGrid: string; chartText: string } {
       const grid = root.style.getPropertyValue("--color-chart-grid").trim();
       const text = root.style.getPropertyValue("--color-chart-text").trim();
       setTokens({
-        chartGrid: grid || (root.classList.contains("dark") ? "#2d3a5a" : "#e5e5e5"),
-        chartText: text || (root.classList.contains("dark") ? "#a0a0a0" : "#4e4b4b"),
+        chartGrid: grid || (root.classList.contains("dark") ? "#3a3a3c" : "#e5e5e5"),
+        chartText: text || (root.classList.contains("dark") ? "#aeaeb2" : "#4e4b4b"),
       });
     }
     read();
