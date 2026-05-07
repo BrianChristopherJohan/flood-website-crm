@@ -64,12 +64,26 @@ export default async function RootLayout({
               var u  = params.get('u');
               if (!at || !rt || !u || at === 'undefined' || rt === 'undefined') return;
               var raw = JSON.parse(decodeURIComponent(u));
-              var role = raw.role || 'admin';
+              // Normalize JWT/API role string → canonical CRM display label.
+              // Mirrors lib/permissions.ts → roleFromJwtOrApiRole. Inlined here
+              // because this script runs before React hydration.
+              var ROLE_MAP = {
+                'ADMIN': 'Admin',
+                'OPERATIONS_MANAGER': 'Operations Manager',
+                'OPERATIONSMANAGER': 'Operations Manager',
+                'FIELD_TECHNICIAN': 'Field Technician',
+                'FIELDTECHNICIAN': 'Field Technician',
+                'NGO_VOLUNTEER': 'NGO Volunteer',
+                'NGOVOLUNTEER': 'NGO Volunteer',
+                'VIEWER': 'Viewer',
+                'CUSTOMER': 'Customer'
+              };
+              var roleKey = String(raw.role || 'CUSTOMER').trim().toUpperCase().replace(/\\s+/g, '_');
               var crmUser = {
                 id: raw.id,
                 name: raw.displayName || raw.name || raw.email,
                 email: raw.email,
-                role: role.charAt(0).toUpperCase() + role.slice(1).toLowerCase(),
+                role: ROLE_MAP[roleKey] || 'Customer',
                 status: 'active',
                 twoFactorEnabled: false,
                 passwordLastChanged: new Date().toISOString(),
@@ -80,6 +94,8 @@ export default async function RootLayout({
               localStorage.setItem('flood_access_token',  decodeURIComponent(at));
               localStorage.setItem('flood_refresh_token', decodeURIComponent(rt));
               localStorage.setItem('flood_auth_user',     JSON.stringify(crmUser));
+              // Strip tokens from the URL bar so they don't linger in history.
+              window.history.replaceState({}, '', '/auth/callback');
             } catch(e) {
               if (process.env.NODE_ENV !== 'production') console.error('[auth-callback] token init failed', e);
             }

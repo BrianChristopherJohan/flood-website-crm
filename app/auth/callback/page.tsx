@@ -41,8 +41,12 @@ function CallbackInner() {
       localStorage.setItem("flood_access_token", decodeURIComponent(at));
       localStorage.setItem("flood_refresh_token", decodeURIComponent(rt));
       localStorage.setItem("flood_auth_user", JSON.stringify(crmUser));
+      // Strip the access/refresh tokens from the URL bar BEFORE navigating
+      // away — otherwise the tokens linger in browser history.
+      window.history.replaceState({}, "", "/auth/callback");
       router.replace("/dashboard");
     } catch {
+      window.history.replaceState({}, "", "/auth/callback");
       router.replace("/login");
     }
   }, [params, router]);
