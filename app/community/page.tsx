@@ -1,9 +1,12 @@
 ﻿"use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useTheme } from "@/lib/ThemeContext";
 import { useAuth } from "@/lib/AuthContext";
 import { authFetch } from "@/lib/authFetch";
+import { usePermissions } from "@/lib/hooks/usePermissions";
+import CommentsModerationPanel from "@/components/community/CommentsModerationPanel";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -31,10 +34,27 @@ function timeAgo(iso: string) {
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function CommunityManagementPage() {
+function CommunityManagementInner() {
   const { isDark } = useTheme();
   const { accessToken, silentRefresh } = useAuth();
-  const [tab, setTab] = useState<"posts" | "groups">("posts");
+  const { can } = usePermissions();
+  const canModerateComments = can("community.comments.moderate");
+
+  // Read ?tab=… from the URL so the redirect from /community/comments
+  // (kept for backward compatibility) lands on the right tab.
+  const params = useSearchParams();
+  const initialTab = (() => {
+    const t = params.get("tab");
+    if (t === "groups" || t === "comments") return t;
+    return "posts";
+  })();
+  const [tab, setTab] = useState<"posts" | "groups" | "comments">(initialTab);
+
+  // Group edit (Update) state — completes CRUD on Groups
+  const [editingGroup, setEditingGroup] = useState<Group | null>(null);
+  const [editGroupForm, setEditGroupForm] = useState({ name: "", description: "", iconColor: "#1d4ed8" });
+  const [editGroupError, setEditGroupError] = useState<string | null>(null);
+  const [savingEditGroup, setSavingEditGroup] = useState(false);
 
   // Posts state
   const [posts, setPosts] = useState<Post[]>([]);
@@ -210,14 +230,21 @@ export default function CommunityManagementPage() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className={`flex gap-1 p-1 rounded-2xl border w-fit ${isDark ? "border-dark-border bg-dark-bg" : "border-light-grey bg-very-light-grey"}`}>
-        {(["posts", "groups"] as const).map(t => (
+      {/* Tabs — Posts, Groups, and Comments (merged from /community/comments) */}
+      <div className={`flex flex-wrap gap-1 p-1 rounded-2xl border w-fit ${isDark ? "border-dark-border bg-dark-bg" : "border-light-grey bg-very-light-grey"}`}>
+        {(canModerateComments
+          ? (["posts", "groups", "comments"] as const)
+          : (["posts", "groups"] as const)
+        ).map(t => (
           <button key={t} type="button" onClick={() => setTab(t)}
             className={`px-5 py-2 rounded-xl text-sm font-semibold capitalize transition-colors ${tab === t
               ? "bg-primary-blue text-pure-white shadow-sm"
               : `${muted} hover:${text}`}`}>
-            {t === "posts" ? `Posts ${posts.length ? `(${posts.length})` : ""}` : `Groups ${groups.length ? `(${groups.length})` : ""}`}
+            {t === "posts"
+              ? `Posts ${posts.length ? `(${posts.length})` : ""}`
+              : t === "groups"
+                ? `Groups ${groups.length ? `(${groups.length})` : ""}`
+                : "Comments"}
           </button>
         ))}
       </div>
@@ -439,13 +466,27 @@ export default function CommunityManagementPage() {
                         </span>
                       </div>
                     </div>
-                    <button type="button" onClick={() => confirmDeleteGroup(g.id)}
-                      disabled={deletingGroup === g.id}
-                      className="flex-shrink-0 flex items-center gap-1 rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-600 hover:text-white transition disabled:opacity-40" >
-                      {deletingGroup === g.id
-                        ? <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                        : "Delete"}
-                    </button>
+                    <div className="flex-shrink-0 flex items-center gap-2">
+                      <button type="button" onClick={() => {
+                        setEditingGroup(g);
+                        setEditGroupForm({
+                          name: g.name,
+                          description: g.description ?? "",
+                          iconColor: g.iconColor,
+                        });
+                        setEditGroupError(null);
+                      }}
+                        className="flex items-center gap-1 rounded-xl border border-primary-blue/30 bg-primary-blue/5 px-3 py-2 text-xs font-semibold text-primary-blue hover:bg-primary-blue hover:text-white transition">
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => confirmDeleteGroup(g.id)}
+                        disabled={deletingGroup === g.id}
+                        className="flex items-center gap-1 rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-xs font-semibold text-red-600 hover:bg-red-600 hover:text-white transition disabled:opacity-40" >
+                        {deletingGroup === g.id
+                          ? <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                          : "Delete"}
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -453,6 +494,110 @@ export default function CommunityManagementPage() {
           </div>
         </div>
       )}
+
+      {/* ── COMMENTS TAB (merged from /community/comments) ── */}
+      {tab === "comments" && canModerateComments && (
+        <CommentsModerationPanel />
+      )}
+
+      {/* ── Edit Group modal — completes CRUD on Groups ── */}
+      {editingGroup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className={`w-full max-w-lg rounded-2xl border shadow-xl ${isDark ? "bg-dark-card border-dark-border" : "bg-pure-white border-light-grey"}`}>
+            <div className={`flex items-center justify-between p-5 border-b ${isDark ? "border-dark-border" : "border-light-grey"}`}>
+              <h3 className={`text-lg font-bold ${text}`}>Edit Group</h3>
+              <button type="button" onClick={() => setEditingGroup(null)}
+                className={`rounded-lg p-1.5 hover:bg-[var(--color-hover)] transition ${muted}`}
+                aria-label="Close">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              setEditGroupError(null);
+              if (!editGroupForm.name.trim()) {
+                setEditGroupError("Name is required");
+                return;
+              }
+              setSavingEditGroup(true);
+              try {
+                const res = await authFetch(`/api/community/groups/${editingGroup.id}`, accessToken!, silentRefresh, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify(editGroupForm),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                  setEditGroupError(data.error || "Failed to update group");
+                  return;
+                }
+                // Update local state with new values
+                setGroups(g => g.map(x => x.id === editingGroup.id ? { ...x, ...editGroupForm, iconLetter: editGroupForm.name[0]?.toUpperCase() ?? x.iconLetter } : x));
+                setEditingGroup(null);
+              } catch {
+                setEditGroupError("Network error — please try again");
+              } finally {
+                setSavingEditGroup(false);
+              }
+            }} className="p-5 space-y-4">
+              {editGroupError && (
+                <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{editGroupError}</div>
+              )}
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${muted}`}>Slug (read-only)</label>
+                <input value={editingGroup.slug} disabled
+                  className={`${inputCls} opacity-60 cursor-not-allowed`} />
+                <p className={`text-[10px] mt-1 ${muted}`}>Slug cannot be changed after creation.</p>
+              </div>
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${muted}`}>Name*</label>
+                <input value={editGroupForm.name}
+                  onChange={e => setEditGroupForm(f => ({ ...f, name: e.target.value }))}
+                  className={inputCls} />
+              </div>
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${muted}`}>Description</label>
+                <textarea value={editGroupForm.description}
+                  onChange={e => setEditGroupForm(f => ({ ...f, description: e.target.value }))}
+                  rows={3} className={`${inputCls} resize-none`} />
+              </div>
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${muted}`}>Icon Color</label>
+                <div className="flex items-center gap-3">
+                  <input type="color" value={editGroupForm.iconColor}
+                    onChange={e => setEditGroupForm(f => ({ ...f, iconColor: e.target.value }))}
+                    className="h-10 w-16 rounded-lg border border-light-grey cursor-pointer" />
+                  <div className="h-10 w-10 rounded-full flex items-center justify-center text-white font-bold text-sm"
+                    style={{ backgroundColor: editGroupForm.iconColor }}>
+                    {editGroupForm.name?.[0]?.toUpperCase() || "G"}
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button type="button" onClick={() => setEditingGroup(null)}
+                  className={`rounded-2xl border px-5 py-2.5 text-sm font-semibold transition ${isDark ? "border-dark-border text-dark-text-secondary hover:bg-dark-border/40" : "border-light-grey text-dark-charcoal/70 hover:bg-very-light-grey"}`}>
+                  Cancel
+                </button>
+                <button type="submit" disabled={savingEditGroup}
+                  className="rounded-2xl bg-primary-blue px-6 py-2.5 text-sm font-semibold text-pure-white hover:bg-primary-blue/90 transition disabled:opacity-50">
+                  {savingEditGroup ? "Saving…" : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </section>
+  );
+}
+
+// useSearchParams() requires a Suspense boundary in Next.js 15+
+export default function CommunityManagementPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-dark-charcoal/60 dark:text-dark-text-secondary">Loading…</div>}>
+      <CommunityManagementInner />
+    </Suspense>
   );
 }
