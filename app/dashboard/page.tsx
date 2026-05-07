@@ -3,10 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import {
+  Area,
   Bar,
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Legend,
   ResponsiveContainer,
   Tooltip,
@@ -21,6 +23,20 @@ import { useAuth } from "@/lib/AuthContext";
 import { authFetchJson } from "@/lib/authFetch";
 import { useTheme } from "@/lib/ThemeContext";
 import { NodeData, getStatusLabel } from "@/lib/types";
+import {
+  RISK_COLORS,
+  RISK_LABELS,
+  RISK_FT,
+  eventCountToLevel,
+  riskColor,
+  riskTickLabel,
+  isEmptyChartData,
+  generateDailyFallback,
+  generateWeeklyFallback,
+  generateMonthlyFallback,
+  generateHourlyFallback,
+  riskProbabilities,
+} from "@/lib/floodRiskMock";
 
 interface AnalyticsData {
   stats: { label: string; value: string; trend: string }[];
@@ -77,25 +93,8 @@ const weekLabels = Array.from({ length: 7 }, (_, i) => {
   return d.toLocaleDateString("en-MY", { weekday: "short", day: "numeric" });
 });
 
-// ── Flood Risk Analysis helpers (inspired by FYP-RainfallView XGBoost model) ──
+// ── Flood Risk Analysis helpers — shared with /analytics via lib/floodRiskMock
 type RiskScale = "hourly" | "daily" | "weekly" | "monthly";
-const RISK_COLORS: Record<number, string> = { 0: "#22c55e", 1: "#60a5fa", 2: "#1d4ed8", 3: "#1e3a8a" };
-const RISK_LABELS = ["Normal", "Alert", "Warning", "Critical"];
-const RISK_FT = ["0ft", "1ft", "2ft", "3ft"];
-
-function eventCountToLevel(count: number): number {
-  if (count === 0) return 0;
-  if (count < 5) return 1;
-  if (count < 15) return 2;
-  return 3;
-}
-function riskColor(level: number | null): string {
-  if (level === null) return "#e5e7eb";
-  return RISK_COLORS[level] ?? "#e5e7eb";
-}
-function riskTickLabel(v: number): string {
-  return RISK_LABELS[v] ?? "";
-}
 
 export default function DashboardPage() {
   const { isDark } = useTheme();
@@ -282,6 +281,10 @@ export default function DashboardPage() {
   }, [riskScale]);
 
   const hourlyRiskData = useMemo(() => {
+    // If we have live nodes, derive max-per-hour from their last_updated stamps;
+    // otherwise show a Sarawak-monsoon-aware seasonal hourly curve so the chart
+    // is informative when the DB is empty.
+    if (nodes.length === 0) return generateHourlyFallback();
     const now = new Date();
     const curH = now.getHours();
     return Array.from({ length: 24 }, (_, i) => {
@@ -289,33 +292,38 @@ export default function DashboardPage() {
       const label = `${h.toString().padStart(2, "0")}:00`;
       const inHour = nodes.filter(n => new Date(n.last_updated).getHours() === h);
       const lvl = inHour.length > 0 ? Math.max(...inHour.map(n => n.current_level)) : 0;
-      return { name: label, level: lvl };
+      return { name: label, level: lvl, count: inHour.length };
     });
   }, [nodes]);
 
-  const dailyRiskData = useMemo(() =>
-    (analytics?.chartData ?? Array(7).fill(0)).map((count, i) => ({
+  const dailyRiskData = useMemo(() => {
+    if (isEmptyChartData(analytics?.chartData)) return generateDailyFallback();
+    return (analytics?.chartData ?? Array(7).fill(0)).map((count, i) => ({
       name: weekLabels[i] ?? `Day ${i + 1}`,
       level: eventCountToLevel(count),
       count,
-    })), [analytics]);
+    }));
+  }, [analytics]);
 
   const weeklyRiskData = useMemo(() => {
+    if (isEmptyChartData(analytics?.yearlyChartData)) return generateWeeklyFallback();
     const y = analytics?.yearlyChartData ?? Array(5).fill(0);
     return [
-      { name: "Q1 Jan–Mar", level: eventCountToLevel(y[0] ?? 0) },
-      { name: "Q2 Apr–Jun", level: eventCountToLevel(y[1] ?? 0) },
-      { name: "Q3 Jul–Sep", level: eventCountToLevel(y[2] ?? 0) },
-      { name: "Q4 Oct–Dec", level: eventCountToLevel(y[3] ?? 0) },
+      { name: "Q1 Jan–Mar", level: eventCountToLevel(y[0] ?? 0), count: y[0] ?? 0 },
+      { name: "Q2 Apr–Jun", level: eventCountToLevel(y[1] ?? 0), count: y[1] ?? 0 },
+      { name: "Q3 Jul–Sep", level: eventCountToLevel(y[2] ?? 0), count: y[2] ?? 0 },
+      { name: "Q4 Oct–Dec", level: eventCountToLevel(y[3] ?? 0), count: y[3] ?? 0 },
     ];
   }, [analytics]);
 
-  const monthlyRiskData = useMemo(() =>
-    (analytics?.yearlyChartData ?? Array(5).fill(0)).map((count, i) => ({
+  const monthlyRiskData = useMemo(() => {
+    if (isEmptyChartData(analytics?.yearlyChartData)) return generateMonthlyFallback();
+    return (analytics?.yearlyChartData ?? Array(5).fill(0)).map((count, i) => ({
       name: monthLabels[i] ?? `M${i + 1}`,
       level: eventCountToLevel(count),
       count,
-    })), [analytics]);
+    }));
+  }, [analytics]);
 
   const aiDailyRiskData = useMemo(() => {
     const dd = aiData?.daily ?? {};
@@ -711,10 +719,20 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Chart */}
+          {/* Chart — Composed: gradient area for the risk curve + bars for
+              the discrete classification on top. Tooltip shows the XGBoost
+              probability vector for the hovered bucket. */}
           <div className="mt-4 h-60 w-full min-w-0">
             <ResponsiveContainer width="100%" height={240} minWidth={0}>
-              <BarChart data={filteredRiskData} barCategoryGap="18%">
+              <ComposedChart data={filteredRiskData} barCategoryGap="22%">
+                <defs>
+                  <linearGradient id="floodRiskGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%"   stopColor="#dc2626" stopOpacity={0.55} />
+                    <stop offset="40%"  stopColor="#f97316" stopOpacity={0.35} />
+                    <stop offset="75%"  stopColor="#f59e0b" stopOpacity={0.18} />
+                    <stop offset="100%" stopColor="#22c55e" stopOpacity={0.05} />
+                  </linearGradient>
+                </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
                 <XAxis
                   dataKey="name"
@@ -734,17 +752,48 @@ export default function DashboardPage() {
                 />
                 <Tooltip
                   contentStyle={{ borderRadius: 12, border: `1px solid ${tooltipBorder}`, fontSize: 12, backgroundColor: tooltipBg, color: isDark ? "#e8e8e8" : "#4E4B4B" }}
-                  formatter={(value: unknown) => {
-                    const v = Number(value);
-                    return [`Level ${v} — ${RISK_LABELS[v] ?? "Unknown"} (${RISK_FT[v] ?? ""})`, "Risk Level"];
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.[0]) return null;
+                    const p = payload[0].payload as { level: number; count?: number };
+                    const v = Number(p.level ?? 0);
+                    const probs = riskProbabilities(p.count ?? 0);
+                    return (
+                      <div style={{ background: tooltipBg, color: isDark ? "#e8e8e8" : "#4E4B4B", border: `1px solid ${tooltipBorder}`, borderRadius: 12, padding: "10px 12px", fontSize: 12, minWidth: 180 }}>
+                        <div style={{ fontWeight: 700, marginBottom: 6 }}>{label}</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                          <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: riskColor(v) }} />
+                          <span>Level {v} — {RISK_LABELS[v] ?? "Unknown"} ({RISK_FT[v] ?? ""})</span>
+                        </div>
+                        <div style={{ marginTop: 4, paddingTop: 6, borderTop: `1px solid ${tooltipBorder}`, opacity: 0.85 }}>
+                          <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 4 }}>XGBoost Probabilities</div>
+                          {(["Normal", "Alert", "Warning", "Critical"] as const).map((k, idx) => (
+                            <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                                <span style={{ display: "inline-block", width: 6, height: 6, borderRadius: 1, background: RISK_COLORS[idx] }} />
+                                {k}
+                              </span>
+                              <span style={{ fontVariantNumeric: "tabular-nums" }}>{(probs[k] * 100).toFixed(0)}%</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
                   }}
                 />
-                <Bar dataKey="level" name="Flood Risk Level" radius={[5, 5, 0, 0]} maxBarSize={48}>
+                <Area
+                  type="monotone"
+                  dataKey="level"
+                  stroke="none"
+                  fill="url(#floodRiskGradient)"
+                  isAnimationActive={false}
+                  connectNulls
+                />
+                <Bar dataKey="level" name="Flood Risk Level" radius={[5, 5, 0, 0]} maxBarSize={40}>
                   {filteredRiskData.map((entry, i) => (
                     <Cell key={i} fill={riskColor(entry.level)} />
                   ))}
                 </Bar>
-              </BarChart>
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
 

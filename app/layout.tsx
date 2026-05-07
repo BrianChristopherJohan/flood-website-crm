@@ -24,7 +24,15 @@ export const metadata: Metadata = {
   description:
     "Command center for IoT flood sensors, live alerts, and predictive analytics.",
   icons: {
-    icon: [{ url: "/icon.png", type: "image/png" }],
+    // Browser tab favicon — Next.js auto-serves app/favicon.ico at /favicon.ico,
+    // app/icon.png at /icon.png, app/apple-icon.png at /apple-icon.png.
+    // We also list them explicitly so legacy crawlers and older browsers that
+    // ignore the auto metadata still find them.
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon.png", type: "image/png" },
+    ],
+    shortcut: [{ url: "/favicon.ico" }],
     apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
   },
 };
