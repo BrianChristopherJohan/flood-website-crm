@@ -44,12 +44,24 @@ html.dark {
   --color-chart-grid: #e5e5e5;
   --color-chart-text: #4e4b4b;
 
+  /* Dark surface tokens — space grey palette (Apple macOS-inspired).
+     Inside @theme inline so Tailwind generates bg-dark-bg, text-dark-text,
+     border-dark-border, etc. utilities with literal values. */
+  --color-dark-bg: #1c1c1e;
+  --color-dark-card: #2c2c2e;
+  --color-dark-card-alt: #3a3a3c;
+  --color-dark-border: #48484a;
+  --color-dark-text: #f5f5f7;
+  --color-dark-text-secondary: #aeaeb2;
+  --color-dark-text-muted: #8e8e93;
+  --color-dark-input-bg: #1c1c1e;
+
   --font-sans: var(--font-geist-sans, "Inter"), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
-/* ── Dark surface tokens — must be in :root, NOT @theme inline,
-      so that var(--color-dark-*) resolves at runtime ───────────────────── */
+/* ── Mirror dark surface tokens to :root so var(--color-dark-*) resolves
+      at runtime in inline styles, arbitrary values, etc. ─────────────────── */
 :root {
   --color-dark-bg: #1c1c1e;
   --color-dark-card: #2c2c2e;
