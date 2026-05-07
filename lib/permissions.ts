@@ -59,6 +59,11 @@ export const appNavigationItems: AppNavItem[] = [
   // the standalone /community/comments route redirects here.
   { label: "Community", href: "/community", iconKey: "community", section: "main", permission: "blog.view" },
   { label: "News & Blog", href: "/blog", iconKey: "news", section: "main", permission: "blog.manage" },
+  // Two feedback entries: every CRM user can submit feedback at /feedback;
+  // admins additionally see the read-only viewer at /admin/feedback with
+  // CSV export. The viewer's actual auth is enforced server-side.
+  { label: "Submit feedback", href: "/feedback", iconKey: "news", section: "main", permission: "dashboard.view", alwaysShow: true },
+  { label: "Survey Responses", href: "/admin/feedback", iconKey: "analytics", section: "management", permission: "roles.manage" },
   { label: "Role Management", href: "/roles", iconKey: "roles", section: "management", permission: "roles.manage" },
   { label: "Account Settings", href: "/admin", iconKey: "account", section: "management", permission: "dashboard.view", alwaysShow: true },
   { label: "CRM Settings", href: "/settings", iconKey: "settings", section: "management", permission: "settings.manage" },
