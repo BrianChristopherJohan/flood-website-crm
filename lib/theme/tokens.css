@@ -1,5 +1,6 @@
 /* Shared Flood design tokens — imported after `@import "tailwindcss"` in each app.
-   Dark theme: space grey surfaces (Apple macOS-inspired). Brand blues unchanged. */
+   Dark theme: blue-tinted slate (GitHub / Linear inspired).
+   Goal: refined hierarchy, cool undertones, no harsh saturated brand cards. */
 
 /* ── Baseline background/foreground (used by Next.js default body) ─────── */
 :root {
@@ -8,8 +9,8 @@
 }
 
 html.dark {
-  --background: #1c1c1e;
-  --foreground: #f5f5f7;
+  --background: #0d1117;
+  --foreground: #e6edf3;
 }
 
 /* ── Tailwind utility palette (inlined into generated utilities) ─────────── */
@@ -44,17 +45,17 @@ html.dark {
   --color-chart-grid: #e5e5e5;
   --color-chart-text: #4e4b4b;
 
-  /* Dark surface tokens — space grey palette (Apple macOS-inspired).
+  /* Dark surface tokens — refined blue-slate palette.
      Inside @theme inline so Tailwind generates bg-dark-bg, text-dark-text,
      border-dark-border, etc. utilities with literal values. */
-  --color-dark-bg: #1c1c1e;
-  --color-dark-card: #2c2c2e;
-  --color-dark-card-alt: #3a3a3c;
-  --color-dark-border: #48484a;
-  --color-dark-text: #f5f5f7;
-  --color-dark-text-secondary: #aeaeb2;
-  --color-dark-text-muted: #8e8e93;
-  --color-dark-input-bg: #1c1c1e;
+  --color-dark-bg: #0d1117;
+  --color-dark-card: #161b22;
+  --color-dark-card-alt: #1c2128;
+  --color-dark-border: #30363d;
+  --color-dark-text: #e6edf3;
+  --color-dark-text-secondary: #b1bac4;
+  --color-dark-text-muted: #8b949e;
+  --color-dark-input-bg: #0d1117;
 
   --font-sans: var(--font-geist-sans, "Inter"), system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
@@ -63,14 +64,14 @@ html.dark {
 /* ── Mirror dark surface tokens to :root so var(--color-dark-*) resolves
       at runtime in inline styles, arbitrary values, etc. ─────────────────── */
 :root {
-  --color-dark-bg: #1c1c1e;
-  --color-dark-card: #2c2c2e;
-  --color-dark-card-alt: #3a3a3c;
-  --color-dark-border: #48484a;
-  --color-dark-text: #f5f5f7;
-  --color-dark-text-secondary: #aeaeb2;
-  --color-dark-text-muted: #8e8e93;
-  --color-dark-input-bg: #1c1c1e;
+  --color-dark-bg: #0d1117;
+  --color-dark-card: #161b22;
+  --color-dark-card-alt: #1c2128;
+  --color-dark-border: #30363d;
+  --color-dark-text: #e6edf3;
+  --color-dark-text-secondary: #b1bac4;
+  --color-dark-text-muted: #8b949e;
+  --color-dark-input-bg: #0d1117;
 }
 
 /* ── Semantic tokens (light mode defaults) ──────────────────────────────── */
@@ -78,41 +79,58 @@ html.dark {
   --color-brand: #1d4ed8;
   --color-brand-dark: #1e40af;
   --color-brand-light: #dbeafe;
+  --color-brand-soft: #2563eb;
+  --color-brand-glow: rgba(56, 139, 253, 0.18);
   --color-navy: #1e3a8a;
   --color-teal: #0891b2;
   --color-upvote: #2563eb;
   --color-bg: #f4f4f5;
   --color-card: #ffffff;
+  --color-card-elevated: #ffffff;
   --color-border: #e4e4e7;
-  --color-text: #1e293b;
+  --color-border-strong: #d4d4d8;
+  --color-text: #0f172a;
+  --color-text-secondary: #334155;
   --color-muted: #64748b;
   --color-pill-bg: #f4f4f5;
   --color-hover: #e4e4e7;
   --color-input-bg: #fafafa;
   --color-chart-grid: #e5e5e5;
   --color-chart-text: #4e4b4b;
+  /* Hero card gradient (for FloodWatch / Live Monitoring cards) */
+  --gradient-hero: linear-gradient(135deg, #1d4ed8 0%, #2563eb 60%, #3b82f6 100%);
   /* CRM legacy alias */
   --color-bg-elevated: var(--color-card);
 }
 
-/* ── Dark mode overrides — direct values, no var() indirection ──────────── */
+/* ── Dark mode overrides — refined blue-slate hierarchy ─────────────────── */
 html.dark {
-  --color-bg: #1c1c1e;
-  --color-card: #2c2c2e;
-  --color-border: #48484a;
-  --color-text: #f5f5f7;
-  --color-muted: #8e8e93;
-  --color-input-bg: #1c1c1e;
-  --color-pill-bg: #3a3a3c;
-  --color-hover: rgba(255, 255, 255, 0.07);
-  --color-chart-grid: #3a3a3c;
-  --color-chart-text: #aeaeb2;
-  --color-bg-elevated: #2c2c2e;
+  --color-bg: #0d1117;             /* page surface — deep slate */
+  --color-card: #161b22;           /* elevated card surface */
+  --color-card-elevated: #1c2128;  /* secondary elevation (modals, popovers) */
+  --color-border: #30363d;         /* visible border */
+  --color-border-strong: #484f58;  /* hover/focus borders */
+  --color-text: #e6edf3;           /* primary text — cool white */
+  --color-text-secondary: #b1bac4; /* secondary readable text */
+  --color-muted: #8b949e;          /* muted but legible */
+  --color-input-bg: #0d1117;       /* inputs sink into page */
+  --color-pill-bg: #21262d;        /* pill / chip backgrounds */
+  --color-hover: rgba(56, 139, 253, 0.10);  /* subtle blue hover glow */
+  --color-chart-grid: #30363d;
+  --color-chart-text: #b1bac4;
+  --color-bg-elevated: #161b22;
+  /* Refined brand accents for dark mode */
+  --color-brand: #1f6feb;
+  --color-brand-dark: #1f6feb;
+  --color-brand-soft: #388bfd;
+  --color-brand-glow: rgba(56, 139, 253, 0.25);
+  /* Hero card gradient — sophisticated, not saturated */
+  --gradient-hero: linear-gradient(135deg, #1f3a6e 0%, #1e40af 50%, #1f6feb 100%);
 }
 
 html.dark body {
-  background: #1c1c1e;
-  color: #f5f5f7;
+  background: #0d1117;
+  color: #e6edf3;
 }
 
 body {
