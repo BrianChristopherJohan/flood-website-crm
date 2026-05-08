@@ -6,12 +6,23 @@ function getToken(req: NextRequest): string | undefined {
   return req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? undefined;
 }
 
-const JAVA_BASE = (
-  process.env.COMMUNITY_JAVA_API_URL ||
-  process.env.JAVA_API_URL ||
-  process.env.NEXT_PUBLIC_JAVA_API_URL ||
-  "http://localhost:4001"
-).replace(/\/$/, "");
+/**
+ * Same fallback logic as /api/admin/surveys/uat — UAT surveys live on
+ * flood-service-community, NOT flood-service-crm. If
+ * `COMMUNITY_JAVA_API_URL` isn't set on Vercel we'd otherwise route
+ * the export request to the wrong service and get 404.
+ */
+function resolveCommunityBase(): string {
+  const explicit = process.env.COMMUNITY_JAVA_API_URL;
+  if (explicit && explicit.length > 0) return explicit.replace(/\/$/, "");
+  const fallback = process.env.JAVA_API_URL || process.env.NEXT_PUBLIC_JAVA_API_URL || "";
+  if (fallback.includes("localhost") || fallback.includes("127.0.0.1")) {
+    return fallback.replace(/\/$/, "");
+  }
+  return "https://flood-service-community-production.up.railway.app";
+}
+
+const JAVA_BASE = resolveCommunityBase();
 
 /**
  * GET /api/admin/surveys/uat/export — admin-only CSV download.
