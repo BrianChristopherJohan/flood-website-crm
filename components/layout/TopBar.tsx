@@ -9,6 +9,7 @@ import logo from "@/public/images/logo.png";
 import { ThemeToggle } from "@/lib/theme/ThemeToggle";
 import { useTheme } from "@/lib/ThemeContext";
 import { useAuth } from "@/lib/AuthContext";
+import NotificationBell from "@/components/NotificationBell";
 
 import SearchModal from "./SearchModal";
 
@@ -261,6 +262,9 @@ export default function TopBar({
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {/* Theme Toggle */}
             <ThemeToggle />
+
+            {/* In-app notification bell — radius-aware flood alerts with sound. */}
+            <NotificationBell />
 
             <Link
               href="/alerts"

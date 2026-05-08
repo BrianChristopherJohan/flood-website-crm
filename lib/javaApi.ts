@@ -29,6 +29,10 @@ const COMMUNITY_JAVA_API_URL = normaliseJavaApiBase(
   JAVA_API_URL,
 );
 
+/** Exposed for routes that proxy long-lived streams (SSE) to the community
+ *  service and need to build the upstream URL themselves. */
+export const COMMUNITY_JAVA_API_BASE = COMMUNITY_JAVA_API_URL;
+
 type FetchOptions = {
   method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
