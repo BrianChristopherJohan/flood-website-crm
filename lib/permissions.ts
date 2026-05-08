@@ -58,6 +58,7 @@ export const appNavigationItems: AppNavItem[] = [
   // Community page now hosts Posts / Groups / Comments tabs in one place;
   // the standalone /community/comments route redirects here.
   { label: "Community", href: "/community", iconKey: "community", section: "main", permission: "blog.view" },
+  { label: "Content Reports", href: "/community/content-reports", iconKey: "community", section: "main", permission: "community.comments.moderate" },
   { label: "News & Blog", href: "/blog", iconKey: "news", section: "main", permission: "blog.manage" },
   // Two feedback entries: every CRM user can submit feedback at /feedback;
   // admins additionally see the read-only viewer at /admin/feedback with
@@ -203,6 +204,7 @@ export const pagePermissions: Record<string, Permission> = {
   "/blog": "blog.manage",
   "/community": "blog.view",
   "/community/comments": "community.comments.moderate",
+  "/community/content-reports": "community.comments.moderate",
   "/reports": "reports.manage",
   "/broadcasts": "alerts.manage",
   "/portal": "dashboard.view",
