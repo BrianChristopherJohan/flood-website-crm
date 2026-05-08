@@ -58,18 +58,6 @@ function SearchIcon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-function NotificationIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      {...props}
-    >
-      <path d="M12 2a7 7 0 00-7 7v4.29l-1.71 1.7a1 1 0 00-.21 1.09A1 1 0 004 17h16a1 1 0 00.92-.62 1 1 0 00-.21-1.09L19 13.59V9a7 7 0 00-7-7zm0 20a3 3 0 01-2.83-2h5.66A3 3 0 0112 22z" />
-    </svg>
-  );
-}
 
 function SettingsIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -131,8 +119,6 @@ export default function TopBar({
 }: TopBarProps) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
-  // TODO: Connect to real unread alerts API
-  const [unreadAlertCount] = useState(0);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { isDark } = useTheme();
   const { user, logout } = useAuth();
@@ -263,25 +249,10 @@ export default function TopBar({
             {/* Theme Toggle */}
             <ThemeToggle />
 
-            {/* In-app notification bell — radius-aware flood alerts with sound. */}
+            {/* Single notification bell — live SSE-style flood alerts with sound + dropdown.
+                The previous static "/alerts" link was removed because it duplicated the
+                dropdown's own "View all alerts" affordance. */}
             <NotificationBell />
-
-            <Link
-              href="/alerts"
-              className={`relative flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-full border transition ${
-                isDark
-                  ? "border-dark-border text-dark-text hover:text-primary-blue hover:border-primary-blue"
-                  : "border-light-grey text-dark-charcoal hover:text-primary-blue hover:border-primary-blue"
-              }`}
-              aria-label="Notifications"
-            >
-              <NotificationIcon className="h-5 w-5" />
-              {unreadAlertCount > 0 && (
-                <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary-blue text-[10px] font-bold text-pure-white">
-                  {unreadAlertCount}
-                </span>
-              )}
-            </Link>
             <Link
               href="/settings"
               className={`hidden sm:flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition ${

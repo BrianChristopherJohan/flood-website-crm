@@ -12,8 +12,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useAuth } from "@/lib/AuthContext";
 import { authFetch } from "@/lib/authFetch";
+import { useTheme } from "@/lib/theme/ThemeProvider";
 
 type Notification = {
   id: string;
@@ -34,6 +36,7 @@ const POLL_MS = 20_000;
 
 export default function NotificationBell() {
   const { accessToken, silentRefresh } = useAuth();
+  const { isDark } = useTheme();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notification[]>([]);
   const [unread, setUnread] = useState(0);
@@ -179,7 +182,11 @@ export default function NotificationBell() {
         }}
         aria-label={`Notifications${unread > 0 ? ` — ${unread} unread` : ""}`}
         aria-expanded={open}
-        className="relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200 hover:bg-white/10 transition"
+        className={`relative flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-full border transition ${
+          isDark
+            ? "border-dark-border text-dark-text hover:text-primary-blue hover:border-primary-blue"
+            : "border-light-grey text-dark-charcoal hover:text-primary-blue hover:border-primary-blue"
+        }`}
       >
         <BellIcon className="h-5 w-5" />
         {unread > 0 && (
@@ -193,33 +200,56 @@ export default function NotificationBell() {
         <div
           role="dialog"
           aria-label="Notifications"
-          className="absolute right-0 top-12 z-50 w-[360px] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-slate-700 bg-slate-900 shadow-xl text-slate-200"
+          className={`absolute right-0 top-12 z-50 w-[360px] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border shadow-xl ${
+            isDark
+              ? "border-dark-border bg-dark-card text-dark-text"
+              : "border-light-grey bg-pure-white text-dark-charcoal"
+          }`}
         >
-          <div className="flex items-center justify-between border-b border-slate-700 px-4 py-3">
+          <div className={`flex items-center justify-between border-b px-4 py-3 ${
+            isDark ? "border-dark-border" : "border-light-grey"
+          }`}>
             <p className="text-sm font-bold">Notifications</p>
             {unread > 0 && (
-              <button type="button" onClick={() => void markAllRead()} className="text-[11px] font-semibold text-blue-300 hover:text-blue-200">
+              <button type="button" onClick={() => void markAllRead()} className="text-[11px] font-semibold text-primary-blue hover:opacity-80">
                 Mark all read
               </button>
             )}
           </div>
           <div className="max-h-[60vh] overflow-y-auto">
             {loading && items.length === 0 && (
-              <p className="px-4 py-6 text-center text-xs text-slate-400">Loading…</p>
+              <p className={`px-4 py-6 text-center text-xs ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+                Loading…
+              </p>
             )}
             {!loading && items.length === 0 && (
               <div className="px-4 py-8 text-center">
-                <BellIcon className="mx-auto mb-2 h-7 w-7 text-slate-600" />
-                <p className="text-xs text-slate-400">You&apos;re all caught up.</p>
+                <BellIcon className={`mx-auto mb-2 h-7 w-7 ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/40"}`} />
+                <p className={`text-xs ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+                  You&apos;re all caught up.
+                </p>
               </div>
             )}
             <ul>
               {items.map(n => (
                 <li key={n.id}>
-                  <Row notification={n} onClick={() => void markRead(n.id)} />
+                  <Row notification={n} isDark={isDark} onClick={() => void markRead(n.id)} />
                 </li>
               ))}
             </ul>
+          </div>
+          <div className={`border-t ${isDark ? "border-dark-border" : "border-light-grey"}`}>
+            <Link
+              href="/alerts"
+              onClick={() => setOpen(false)}
+              className={`block px-4 py-3 text-center text-[11px] font-semibold transition ${
+                isDark
+                  ? "text-primary-blue hover:bg-white/5"
+                  : "text-primary-blue hover:bg-very-light-grey"
+              }`}
+            >
+              View all alerts →
+            </Link>
           </div>
         </div>
       )}
@@ -227,7 +257,7 @@ export default function NotificationBell() {
   );
 }
 
-function Row({ notification, onClick }: { notification: Notification; onClick: () => void }) {
+function Row({ notification, isDark, onClick }: { notification: Notification; isDark: boolean; onClick: () => void }) {
   const tone =
     notification.severity === "critical" ? { bg: "rgba(220, 38, 38, 0.12)", dot: "#dc2626" } :
     notification.severity === "warning"  ? { bg: "rgba(249, 115, 22, 0.12)", dot: "#f97316" } :
@@ -237,23 +267,27 @@ function Row({ notification, onClick }: { notification: Notification; onClick: (
   return (
     <button type="button" onClick={onClick} className="block w-full text-left">
       <div
-        className="flex gap-3 px-4 py-3 transition hover:bg-white/5"
+        className={`flex gap-3 px-4 py-3 transition ${isDark ? "hover:bg-white/5" : "hover:bg-very-light-grey"}`}
         style={isUnread ? { background: tone.bg } : undefined}
       >
         <span
           className="mt-1 h-2.5 w-2.5 flex-shrink-0 rounded-full"
           style={{
             backgroundColor: isUnread ? tone.dot : "transparent",
-            border: isUnread ? "none" : "1px solid #334155",
+            border: isUnread ? "none" : `1px solid ${isDark ? "#334155" : "#cbd5e1"}`,
           }}
           aria-hidden
         />
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-bold text-slate-100">{notification.title}</p>
+          <p className={`text-xs font-bold ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>{notification.title}</p>
           {notification.body && (
-            <p className="mt-0.5 line-clamp-2 text-[11px] text-slate-400">{notification.body}</p>
+            <p className={`mt-0.5 line-clamp-2 text-[11px] ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+              {notification.body}
+            </p>
           )}
-          <p className="mt-1 text-[10px] text-slate-500">{formatRelative(notification.createdAt)}</p>
+          <p className={`mt-1 text-[10px] ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/50"}`}>
+            {formatRelative(notification.createdAt)}
+          </p>
         </div>
       </div>
     </button>
