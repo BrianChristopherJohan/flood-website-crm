@@ -55,10 +55,10 @@ export const appNavigationItems: AppNavItem[] = [
   { label: "Flood Map", href: "/map", iconKey: "map", section: "main", permission: "map.view" },
   { label: "Analytics", href: "/analytics", iconKey: "analytics", section: "main", permission: "analytics.view" },
   { label: "Alerts", href: "/alerts", iconKey: "alerts", section: "main", permission: "alerts.view" },
-  // Community page now hosts Posts / Groups / Comments tabs in one place;
-  // the standalone /community/comments route redirects here.
+  // Community page now hosts Posts / Groups / Comments / Reports tabs in
+  // one place; standalone /community/comments and /community/content-reports
+  // routes redirect here.
   { label: "Community", href: "/community", iconKey: "community", section: "main", permission: "blog.view" },
-  { label: "Content Reports", href: "/community/content-reports", iconKey: "community", section: "main", permission: "community.comments.moderate" },
   { label: "News & Blog", href: "/blog", iconKey: "news", section: "main", permission: "blog.manage" },
   // Two feedback entries: every CRM user can submit feedback at /feedback;
   // admins additionally see the read-only viewer at /admin/feedback with

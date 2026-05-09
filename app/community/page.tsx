@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { authFetch } from "@/lib/authFetch";
 import { usePermissions } from "@/lib/hooks/usePermissions";
 import CommentsModerationPanel from "@/components/community/CommentsModerationPanel";
+import ReportsModerationPanel from "@/components/community/ReportsModerationPanel";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -45,10 +46,11 @@ function CommunityManagementInner() {
   const params = useSearchParams();
   const initialTab = (() => {
     const t = params.get("tab");
-    if (t === "groups" || t === "comments") return t;
+    if (t === "groups" || t === "comments" || t === "reports") return t;
     return "posts";
   })();
-  const [tab, setTab] = useState<"posts" | "groups" | "comments">(initialTab);
+  const [tab, setTab] = useState<"posts" | "groups" | "comments" | "reports">(initialTab);
+  const [pendingReports, setPendingReports] = useState(0);
 
   // Group edit (Update) state — completes CRUD on Groups
   const [editingGroup, setEditingGroup] = useState<Group | null>(null);
@@ -230,21 +232,28 @@ function CommunityManagementInner() {
         </div>
       )}
 
-      {/* Tabs — Posts, Groups, and Comments (merged from /community/comments) */}
+      {/* Tabs — Posts, Groups, Comments, Reports (merged from /community/* sub-pages) */}
       <div className={`flex flex-wrap gap-1 p-1 rounded-2xl border w-fit ${isDark ? "border-dark-border bg-dark-bg" : "border-light-grey bg-very-light-grey"}`}>
         {(canModerateComments
-          ? (["posts", "groups", "comments"] as const)
+          ? (["posts", "groups", "comments", "reports"] as const)
           : (["posts", "groups"] as const)
         ).map(t => (
           <button key={t} type="button" onClick={() => setTab(t)}
-            className={`px-5 py-2 rounded-xl text-sm font-semibold capitalize transition-colors ${tab === t
+            className={`relative px-5 py-2 rounded-xl text-sm font-semibold capitalize transition-colors ${tab === t
               ? "bg-primary-blue text-pure-white shadow-sm"
               : `${muted} hover:${text}`}`}>
             {t === "posts"
               ? `Posts ${posts.length ? `(${posts.length})` : ""}`
               : t === "groups"
                 ? `Groups ${groups.length ? `(${groups.length})` : ""}`
-                : "Comments"}
+                : t === "comments"
+                  ? "Comments"
+                  : "Reports"}
+            {t === "reports" && pendingReports > 0 && tab !== "reports" && (
+              <span className="ml-2 inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                {pendingReports > 99 ? "99+" : pendingReports}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -498,6 +507,11 @@ function CommunityManagementInner() {
       {/* ── COMMENTS TAB (merged from /community/comments) ── */}
       {tab === "comments" && canModerateComments && (
         <CommentsModerationPanel />
+      )}
+
+      {/* ── REPORTS TAB (merged from /community/content-reports) ── */}
+      {tab === "reports" && canModerateComments && (
+        <ReportsModerationPanel onPendingCountChange={setPendingReports} />
       )}
 
       {/* ── Edit Group modal — completes CRUD on Groups ── */}
