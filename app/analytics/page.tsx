@@ -588,43 +588,6 @@ export default function AnalyticsPage() {
         </div>
       </article>
 
-      {/* ─── Recent Events ───────────────────────────────────────────────────── */}
-      <article
-        className={`rounded-3xl border p-5 shadow-sm transition-colors ${
-          isDark ? "border-dark-border bg-dark-card" : "border-light-grey bg-pure-white"
-        }`}
-      >
-        <h2 className={`text-lg font-semibold transition-colors ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>
-          Recent Events
-        </h2>
-        <ul className="mt-4 space-y-3">
-          {(data?.recentEvents ?? []).map((event, i) => (
-            <li
-              key={i}
-              className={`flex items-start justify-between rounded-2xl border px-4 py-3 transition-colors ${
-                isDark ? "border-dark-border bg-dark-bg" : "border-light-grey"
-              }`}
-            >
-              <div>
-                <p className={`text-sm font-semibold ${event.type === "warning" ? "text-primary-red" : isDark ? "text-dark-text" : "text-dark-charcoal"}`}>
-                  {event.title}
-                </p>
-                <p className={`text-xs mt-0.5 transition-colors ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
-                  {event.timestamp}
-                </p>
-              </div>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
-                event.type === "warning"
-                  ? "bg-primary-red/20 text-primary-red"
-                  : "bg-status-green/20 text-status-green"
-              }`}>
-                {event.type}
-              </span>
-            </li>
-          ))}
-        </ul>
-      </article>
-
       {/* ─── Recommendation Engine ──────────────────────────────────────────── */}
       <article
         className={`rounded-3xl border p-5 shadow-sm transition-colors ${

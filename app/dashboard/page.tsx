@@ -243,8 +243,6 @@ export default function DashboardPage() {
     total: s.total,
     critical: 0,
   }));
-  const recentActivity = analytics?.recentEvents ?? [];
-
   // ── Flood Risk Analysis state ────────────────────────────────────────────
   const [riskScale, setRiskScale] = useState<RiskScale>("daily");
   const [minLevel, setMinLevel] = useState(0);
@@ -620,10 +618,10 @@ export default function DashboardPage() {
         </article>
       </div>
 
-      {/* ─── Flood Risk Analysis + Recent Activity ──────────────────────────── */}
-      <div className="grid gap-6 lg:grid-cols-3">
+      {/* ─── Flood Risk Analysis ────────────────────────────────────────────── */}
+      <div className="grid gap-6">
         <article
-          className={`rounded-3xl border p-5 shadow-sm lg:col-span-2 transition-colors ${
+          className={`rounded-3xl border p-5 shadow-sm transition-colors ${
             isDark ? "border-dark-border bg-dark-card" : "border-light-grey bg-pure-white"
           }`}
         >
@@ -738,47 +736,6 @@ export default function DashboardPage() {
           </div>
         </article>
 
-        <article
-          className={`rounded-3xl border p-5 shadow-sm transition-colors ${
-            isDark
-              ? "border-dark-border bg-dark-card"
-              : "border-light-grey bg-pure-white"
-          }`}
-        >
-          <h2
-            className={`text-lg font-semibold transition-colors ${
-              isDark ? "text-dark-text" : "text-dark-charcoal"
-            }`}
-          >
-            Recent Activity
-          </h2>
-          <ul className="mt-4 space-y-3 max-h-64 overflow-y-auto">
-            {recentActivity.length === 0 && (
-              <li className={`py-4 text-center text-sm ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
-                No recent events
-              </li>
-            )}
-            {recentActivity.map((item, idx) => (
-              <li
-                key={idx}
-                className={`rounded-2xl border px-4 py-3 transition-colors ${
-                  isDark ? "border-dark-border bg-dark-bg" : "border-light-grey"
-                }`}
-              >
-                <p className={`text-sm font-semibold ${item.type === "warning" ? "text-primary-red" : isDark ? "text-dark-text" : "text-dark-charcoal"}`}>
-                  {item.title}
-                </p>
-                <p
-                  className={`text-xs transition-colors ${
-                    isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"
-                  }`}
-                >
-                  {item.timestamp}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </article>
       </div>
 
       {/* ─── Bar Charts Row ─────────────────────────────────────────────────── */}

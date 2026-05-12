@@ -236,15 +236,34 @@ export default function SensorsPage() {
   const filteredRows = useMemo(() => {
     let result = tableRows;
 
-    // Search filter
+    // Search filter — substring match across node_id + statuses.
+    // When the user has NOT picked an explicit sort, we rank results so that
+    // prefix matches on node_id float to the top, then earlier-index matches,
+    // then the rest. Without this, searching "12" surfaced "185460121" above
+    // node IDs that actually start with "12".
     if (searchValue.trim()) {
       const query = searchValue.toLowerCase();
-      result = result.filter(
-        (row) =>
-          row.node_id.toLowerCase().includes(query) ||
-          row.status.toLowerCase().includes(query) ||
-          row.node_status.toLowerCase().includes(query)
-      );
+      const matches = result
+        .map((row) => {
+          const nid = row.node_id.toLowerCase();
+          const nidIdx = nid.indexOf(query);
+          const statusHit = row.status.toLowerCase().includes(query);
+          const nodeStatusHit = row.node_status.toLowerCase().includes(query);
+          if (nidIdx === -1 && !statusHit && !nodeStatusHit) return null;
+          // Lower score = better rank. node_id matches outrank status matches;
+          // earlier indices outrank later ones.
+          const score =
+            nidIdx === -1
+              ? 10_000 + (statusHit ? 0 : 1)
+              : nidIdx;
+          return { row, score };
+        })
+        .filter((m): m is { row: typeof result[number]; score: number } => m !== null);
+
+      if (!sortConfig) {
+        matches.sort((a, b) => a.score - b.score);
+      }
+      result = matches.map((m) => m.row);
     }
 
     // Water status filter
