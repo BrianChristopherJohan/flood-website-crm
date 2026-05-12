@@ -155,19 +155,38 @@ export default function NotificationBell() {
   // Returns a Promise so the click handler can await persistence before
   // navigating. Without that await, navigation can race the POST and the
   // bell on the next page re-fetches with the row still unread.
+  //
+  // If the server-side write fails the optimistic decrement is rolled
+  // back and the count is re-synced from /unread-count, so a reload can
+  // never disagree with what the badge shows now.
   const markRead = useCallback(async (id: string) => {
     if (!accessToken) return;
-    setItems(prev => prev.map(n => n.id === id ? { ...n, readAt: new Date().toISOString() } : n));
-    setUnread(c => Math.max(0, c - 1));
+    let rollbackItems: Notification[] | null = null;
+    let rollbackUnread = 0;
+    setItems(prev => {
+      rollbackItems = prev;
+      return prev.map(n => n.id === id ? { ...n, readAt: new Date().toISOString() } : n);
+    });
+    setUnread(c => {
+      rollbackUnread = c;
+      return Math.max(0, c - 1);
+    });
     try {
-      await authFetch(
+      const res = await authFetch(
         `/api/notifications/${encodeURIComponent(id)}/read`,
         accessToken,
         silentRefresh,
         { method: "POST" },
       );
-    } catch { /* optimistic — local state already cleared */ }
-  }, [accessToken, silentRefresh]);
+      if (!res.ok) throw new Error(`mark-read ${res.status}`);
+    } catch {
+      if (rollbackItems) setItems(rollbackItems);
+      setUnread(rollbackUnread);
+      // Re-sync from server so the badge reflects truth.
+      const fresh = await fetchUnread();
+      setUnread(fresh);
+    }
+  }, [accessToken, silentRefresh, fetchUnread]);
 
   async function markAllRead() {
     if (!accessToken) return;
