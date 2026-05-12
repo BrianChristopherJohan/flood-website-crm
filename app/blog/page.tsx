@@ -3,6 +3,7 @@
 import { useTheme } from "@/lib/ThemeContext";
 import { useAuth } from "@/lib/AuthContext";
 import { authFetch } from "@/lib/authFetch";
+import BlogImageUploader from "@/components/BlogImageUploader";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -129,10 +130,9 @@ function BlogFormModal({
   const handleSave = async () => {
     if (!form.title.trim()) { setError("Title is required."); return; }
     if (!form.body.trim())  { setError("Content is required."); return; }
-    if (form.imageUrl.trim()) {
-      try { new URL(form.imageUrl.trim()); }
-      catch { setError("Image URL must be a valid URL (e.g. https://…)."); return; }
-    }
+    // The uploader emits a `data:image/jpeg;base64,...` URL which is
+    // already validated against the allowed image types client-side.
+    // Empty is fine — the blog uses a bundled imageKey as fallback.
     setError(""); setSaving(true);
     try {
       await onSave(form);
@@ -204,17 +204,15 @@ function BlogFormModal({
             </div>
           </div>
 
-          {/* Image URL */}
+          {/* Hero image — file upload replaces the legacy URL paste field */}
           <div>
             <label className="block text-sm font-semibold mb-1.5 text-[var(--color-text)]">
-              Image URL <span className="text-xs font-normal text-[var(--color-muted)]">(optional)</span>
+              Hero image <span className="text-xs font-normal text-[var(--color-muted)]">(optional)</span>
             </label>
-            <input
-              type="url"
-              value={form.imageUrl}
-              onChange={e => set("imageUrl", e.target.value)}
-              placeholder="https://example.com/image.jpg"
-              className="w-full rounded-lg border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-[var(--color-input-bg)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-muted)]"
+            <BlogImageUploader
+              value={form.imageUrl || null}
+              onChange={(dataUrl) => set("imageUrl", dataUrl)}
+              onClear={() => set("imageUrl", "")}
             />
           </div>
 
