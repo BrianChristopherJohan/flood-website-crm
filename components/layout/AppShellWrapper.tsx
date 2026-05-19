@@ -74,8 +74,44 @@ function AccessDenied() {
   );
 }
 
+/**
+ * Yellow "service starting" banner shown when AuthContext hydrated
+ * with a synthesised profile (Java was unreachable, displayName +
+ * avatarUrl missing). Surfaces the cold-start state to the operator
+ * instead of leaving them with a blank-avatar shell that looks like
+ * the system is broken. (QA P0-7.)
+ */
+function ServiceWarmingBanner({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200"
+    >
+      <span>
+        Backend is starting up. Your name and avatar may take a few seconds
+        to load.
+      </span>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="rounded-lg border border-amber-400 bg-white/60 px-2.5 py-1 text-xs font-semibold hover:bg-white dark:border-amber-600 dark:bg-amber-900/40 dark:hover:bg-amber-900/60"
+      >
+        Retry
+      </button>
+    </div>
+  );
+}
+
 export default function AppShellWrapper({ children }: AppShellWrapperProps) {
-  const { user, isAuthenticated, isLoading, logout } = useAuth();
+  const {
+    user,
+    isAuthenticated,
+    isLoading,
+    logout,
+    isProfileSynthesized,
+    refreshProfile,
+  } = useAuth();
   const { isDark } = useTheme();
   const pathname = usePathname();
   const router = useRouter();
@@ -185,7 +221,12 @@ export default function AppShellWrapper({ children }: AppShellWrapperProps) {
   // surface flood alerts on every CRM page (Dashboard, Sensors, Map, etc.)
   return (
     <SensorStreamProvider isDark={isDark}>
-      <AppShell>{children}</AppShell>
+      <AppShell>
+        {isProfileSynthesized && (
+          <ServiceWarmingBanner onRetry={refreshProfile} />
+        )}
+        {children}
+      </AppShell>
     </SensorStreamProvider>
   );
 }

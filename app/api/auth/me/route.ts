@@ -61,6 +61,17 @@ type MeResponse = {
     /** Display label (Admin, Operations Manager, …). */
     roleLabel: string;
   };
+  /**
+   * QA P0-7: when the Java backend is unreachable (Railway cold start,
+   * Neon outage, network blip), we synthesise a minimal profile from
+   * the JWT claims so the user can still navigate the shell. Setting
+   * this flag tells AuthContext to render a yellow "service starting"
+   * banner with a retry button instead of silently showing a blank
+   * avatar + missing name (which looks like the system is broken).
+   *
+   * `false` / absent means the response is authoritative.
+   */
+  synthesized?: boolean;
 };
 
 function unauthenticated(reason: string): NextResponse {
@@ -84,26 +95,48 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // ── 1. Verify JWT ─────────────────────────────────────────────
+  // ── 1. Verify JWT (QA P0-1 — fail closed without secret) ─────
   const secret = process.env.JWT_SECRET;
   let payload: ReturnType<typeof decodeJwtPayload> = null;
   if (secret) {
     const verified = await verifyJwtSignature(token, secret);
     if (!verified.ok) {
+      // Distinct codes so the client knows whether to clear cookies
+      // (invalid signature) or just retry (expired during cold start).
       return unauthenticated(
-        verified.reason === "expired" ? "expired" : "invalid_signature",
+        verified.reason === "expired"
+          ? "expired"
+          : verified.reason === "invalid-signature"
+            ? "invalid_signature"
+            : "malformed",
       );
     }
     payload = verified.payload;
-  } else {
-    // No shared secret available (transitional / dev). Payload-only
-    // check — Java's signature verification on /profile is still the
-    // final wall against forgery.
+  } else if (
+    process.env.ALLOW_PAYLOAD_ONLY_AUTH === "true" &&
+    process.env.NODE_ENV !== "production"
+  ) {
+    // Opt-in dev fallback. Java's signature verification on /profile
+    // is still the final wall against forgery — this just lets local
+    // dev work without copying the secret around.
     payload = decodeJwtPayload(token);
     if (!payload) return unauthenticated("malformed");
     if (typeof payload.exp === "number" && payload.exp * 1000 < Date.now()) {
       return unauthenticated("expired");
     }
+  } else {
+    // No secret AND not opted-in: refuse rather than silently bypass.
+    // Logs the misconfig so ops can fix it.
+    console.error(
+      "[auth/me] JWT_SECRET is not set; refusing the request. " +
+        "Set it on the Vercel project (Production + Preview) to match " +
+        "the Java backend's JWT_SECRET. To enable a dev-only payload-" +
+        "only fallback, set ALLOW_PAYLOAD_ONLY_AUTH=true with NODE_ENV!=production.",
+    );
+    return NextResponse.json(
+      { error: "misconfigured", reason: "missing_jwt_secret" },
+      { status: 503 },
+    );
   }
 
   // ── 2. Role gate ──────────────────────────────────────────────
@@ -124,6 +157,7 @@ export async function GET(req: NextRequest) {
 
   const cacheKey = `me:${sub}`;
   let profile: JavaProfile | null = null;
+  let synthesized = false;
   try {
     profile = await redis.get<JavaProfile>(cacheKey);
   } catch {
@@ -139,20 +173,28 @@ export async function GET(req: NextRequest) {
         // Java rejected the token — treat as unauthenticated.
         return unauthenticated("java_rejected");
       }
-      // Soft-fail: synthesise a minimal profile from the JWT claims
-      // so the user can still navigate while Java is warming up.
+      // QA P0-7: synthesise a minimal profile from the JWT claims so
+      // the user can still navigate while Java is warming up. Mark
+      // the response so AuthContext shows a "service starting" banner
+      // and a retry button instead of leaving the operator with a
+      // blank avatar + no name (which looks like the system is broken).
       profile = {
         id: sub,
         email: typeof payload?.email === "string" ? payload.email : "",
         displayName: null,
         avatarUrl: null,
       };
+      synthesized = true;
     }
-    // Best-effort cache write — never block the response.
-    try {
-      await redis.set(cacheKey, JSON.stringify(profile), { ex: 30 });
-    } catch {
-      // ignore
+    // Best-effort cache write — but don't poison the cache with a
+    // synthesised profile or future requests would keep getting the
+    // half-baked response even after Java recovers.
+    if (!synthesized) {
+      try {
+        await redis.set(cacheKey, JSON.stringify(profile), { ex: 30 });
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -176,6 +218,7 @@ export async function GET(req: NextRequest) {
       role: roleKey,
       roleLabel,
     },
+    ...(synthesized ? { synthesized: true as const } : {}),
   };
   return NextResponse.json(body);
 }

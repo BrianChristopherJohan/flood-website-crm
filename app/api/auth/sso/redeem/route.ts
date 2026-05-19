@@ -68,29 +68,37 @@ export async function POST(req: NextRequest) {
     return fail(410, "code_invalid_or_expired");
   }
 
-  // ── JWT signature gate ──────────────────────────────────────
+  // ── JWT signature gate (QA P0-1 — fail closed without secret) ─
   const secret = process.env.JWT_SECRET;
   let jwtRole: string | null;
   let exp: number | null = null;
   if (secret) {
     const verified = await verifyJwtSignature(payload.accessToken, secret);
     if (!verified.ok) {
-      // Either the bundle was tampered with in Upstash (unlikely —
-      // we mint it from our own login flow) or JWT_SECRET drifted
-      // between Java and CRM.
+      // Bundle tampered with in Upstash (unlikely — we mint it
+      // from our own login flow) OR JWT_SECRET drifted between
+      // Java and CRM.
       return fail(500, "redeem_failed");
     }
     jwtRole =
       typeof verified.payload.role === "string" ? verified.payload.role : null;
     exp =
       typeof verified.payload.exp === "number" ? verified.payload.exp : null;
-  } else {
-    // No secret → payload-only check (transitional). Java still
-    // verifies on every authenticated call; this is just a basic
-    // structural sanity check.
+  } else if (
+    process.env.ALLOW_PAYLOAD_ONLY_AUTH === "true" &&
+    process.env.NODE_ENV !== "production"
+  ) {
+    // Opt-in dev fallback only. Java's signature verification on
+    // every authenticated call is still the wall.
     const decoded = decodeJwtPayload(payload.accessToken);
     jwtRole = typeof decoded?.role === "string" ? decoded.role : null;
     exp = typeof decoded?.exp === "number" ? decoded.exp : null;
+  } else {
+    console.error(
+      "[sso/redeem] JWT_SECRET not set; refusing redeem. " +
+        "Set JWT_SECRET on Vercel to match the Java backend secret.",
+    );
+    return fail(503, "misconfigured");
   }
 
   // ── Role gate ───────────────────────────────────────────────

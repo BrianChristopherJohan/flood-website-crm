@@ -37,8 +37,32 @@ import { redirect } from "next/navigation";
 // updated.
 export const dynamic = "force-dynamic";
 
-export default function LoginPage() {
+type SearchParams = { error?: string | string[]; callbackUrl?: string | string[] };
+
+function first(v: string | string[] | undefined): string | null {
+  if (typeof v === "string") return v;
+  if (Array.isArray(v) && v.length > 0) return v[0];
+  return null;
+}
+
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>;
+}) {
+  // Preserve ?error= and ?callbackUrl= across the cross-origin hop so
+  // the community login form can render the right banner instead of
+  // dropping the user back to a clean /login with no context.
+  // (QA P0-1 + P1-1: misconfigured / invalid_signature / expired all
+  // round-trip through this page on their way back to community.)
+  const params = await searchParams;
   const communityUrl =
     process.env.NEXT_PUBLIC_COMMUNITY_URL || "http://localhost:3002";
-  redirect(`${communityUrl}/login`);
+  const qs = new URLSearchParams();
+  const errorCode = first(params.error);
+  const cb = first(params.callbackUrl);
+  if (errorCode) qs.set("error", errorCode);
+  if (cb) qs.set("callbackUrl", cb);
+  const suffix = qs.toString();
+  redirect(`${communityUrl}/login${suffix ? `?${suffix}` : ""}`);
 }

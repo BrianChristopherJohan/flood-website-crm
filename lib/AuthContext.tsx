@@ -58,6 +58,15 @@ type AuthContextType = {
   isAuthenticated: boolean;
   isLoading: boolean;
   sessions: Session[];
+  /**
+   * True when AuthContext hydrated from `/api/auth/me` but the Java
+   * backend was unreachable, so `displayName` + `avatarUrl` are missing.
+   * AppShellWrapper surfaces a yellow "service starting" banner with a
+   * retry button. (QA P0-7 — cold-start UX.)
+   */
+  isProfileSynthesized: boolean;
+  /** Re-hydrate the profile by calling `/api/auth/me` again. */
+  refreshProfile: () => Promise<void>;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   register: (name: string, email: string, password: string, confirmPassword: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
@@ -228,6 +237,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isProfileSynthesized, setIsProfileSynthesized] = useState(false);
   const router = useRouter();
   const refreshTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -304,7 +314,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 role: string;
                 roleLabel: string;
               };
+              synthesized?: boolean;
             };
+            // QA P0-7: surface cold-start state so AppShellWrapper
+            // can render a "service starting" banner with a retry
+            // button instead of a half-rendered shell.
+            setIsProfileSynthesized(data.synthesized === true);
             const localUser: User = {
               id: data.user.id,
               name: data.user.displayName || data.user.email,
@@ -501,6 +516,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, [accessToken]);
 
+  // QA P0-7: lets AppShellWrapper "Retry" button re-hit /api/auth/me
+  // and clear the cold-start banner once Java is warm.
+  const refreshProfile = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch("/api/auth/me", {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as {
+        user: {
+          id: string;
+          email: string;
+          displayName: string;
+          avatarUrl: string | null;
+          role: string;
+          roleLabel: string;
+        };
+        synthesized?: boolean;
+      };
+      setIsProfileSynthesized(data.synthesized === true);
+      setUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              name: data.user.displayName || data.user.email,
+              email: data.user.email,
+              avatarUrl: data.user.avatarUrl ?? undefined,
+              role: roleFromJwtOrApiRole(data.user.roleLabel || data.user.role),
+            }
+          : prev,
+      );
+    } catch {
+      // Network blip — leave the synthesised banner as-is; user can retry.
+    }
+  }, []);
+
   const changePassword = useCallback(async (
     currentPassword: string,
     newPassword: string,
@@ -559,6 +612,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isLoading,
         sessions,
+        isProfileSynthesized,
+        refreshProfile,
         login,
         register,
         logout,

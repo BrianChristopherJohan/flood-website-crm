@@ -69,11 +69,14 @@ async function setAuthCookies(args: {
 
 async function verifyAndExtractRole(
   accessToken: string,
-): Promise<{ ok: true; role: string | null; exp: number | null } | { ok: false }> {
+): Promise<
+  | { ok: true; role: string | null; exp: number | null }
+  | { ok: false; reason: "invalid" | "misconfigured" }
+> {
   const secret = process.env.JWT_SECRET;
   if (secret) {
     const verified = await verifyJwtSignature(accessToken, secret);
-    if (!verified.ok) return { ok: false };
+    if (!verified.ok) return { ok: false, reason: "invalid" };
     return {
       ok: true,
       role:
@@ -84,15 +87,24 @@ async function verifyAndExtractRole(
         typeof verified.payload.exp === "number" ? verified.payload.exp : null,
     };
   }
-  // Payload-only fallback (transitional / dev). Java's signature
-  // gate on /profile + middleware payload check are the safety net.
-  const decoded = decodeJwtPayload(accessToken);
-  if (!decoded) return { ok: false };
-  return {
-    ok: true,
-    role: typeof decoded.role === "string" ? decoded.role : null,
-    exp: typeof decoded.exp === "number" ? decoded.exp : null,
-  };
+  // QA P0-1: refuse silent payload-only acceptance. Dev opt-in only.
+  if (
+    process.env.ALLOW_PAYLOAD_ONLY_AUTH === "true" &&
+    process.env.NODE_ENV !== "production"
+  ) {
+    const decoded = decodeJwtPayload(accessToken);
+    if (!decoded) return { ok: false, reason: "invalid" };
+    return {
+      ok: true,
+      role: typeof decoded.role === "string" ? decoded.role : null,
+      exp: typeof decoded.exp === "number" ? decoded.exp : null,
+    };
+  }
+  console.error(
+    "[auth/callback] JWT_SECRET not set; refusing to set cookies. " +
+      "Set JWT_SECRET on Vercel to match the Java backend secret.",
+  );
+  return { ok: false, reason: "misconfigured" };
 }
 
 export default async function AuthCallbackPage({
@@ -118,7 +130,14 @@ export default async function AuthCallbackPage({
     }
     const verified = await verifyAndExtractRole(payload.accessToken);
     if (!verified.ok) {
-      redirect("/login?error=sso_failed");
+      // Distinguish the misconfig (JWT_SECRET missing on Vercel) from
+      // a genuinely invalid bundle. The community login page shows
+      // different banners + the misconfig pings ops via Vercel logs.
+      redirect(
+        verified.reason === "misconfigured"
+          ? "/login?error=misconfigured"
+          : "/login?error=sso_failed",
+      );
     }
     if (!isOperatorRole(verified.role)) {
       redirect("/login?error=role");
@@ -135,7 +154,11 @@ export default async function AuthCallbackPage({
   if (at && rt) {
     const verified = await verifyAndExtractRole(at);
     if (!verified.ok) {
-      redirect("/login?error=callback");
+      redirect(
+        verified.reason === "misconfigured"
+          ? "/login?error=misconfigured"
+          : "/login?error=callback",
+      );
     }
     if (!isOperatorRole(verified.role)) {
       redirect("/login?error=role");

@@ -82,26 +82,39 @@ export async function middleware(req: NextRequest) {
     return loginRedirect(req, "expired");
   }
 
-  // ── Cryptographic verification (Phase 2.B) ─────────────────────
+  // ── Cryptographic verification ────────────────────────────────
   //
-  // When JWT_SECRET is configured, jose.jwtVerify enforces:
+  // `JWT_SECRET` is REQUIRED in production. With it set, `jose.jwtVerify`
+  // enforces:
   //   - the signature matches (rejects forged tokens)
   //   - the `exp` claim is in the future
   //   - the alg is HS256 (rejects "alg: none" attacks)
   //
-  // We pass the secret via `process.env.JWT_SECRET`. Edge runtime
-  // can read env vars at request time on Vercel.
+  // The previous "silent payload-only fallback" was deleted (QA P0-1):
+  // an attacker who could write a JWT with a future `exp` + operator
+  // role would have walked past the gate on any Vercel project where
+  // the env var was forgotten. We now FAIL CLOSED — missing secret =
+  // reject the request with a tagged error code that the login page
+  // surfaces as "Sign-in is misconfigured. Contact your administrator."
+  //
+  // The fallback still exists for local dev, but it's opt-in via an
+  // explicit `ALLOW_PAYLOAD_ONLY_AUTH=true` env var. CI checks reject
+  // builds where that flag is set alongside `NODE_ENV=production`.
   const secret = process.env.JWT_SECRET;
   if (secret) {
     const verified = await verifyJwtSignature(token, secret);
     if (!verified.ok) {
-      // Signature mismatch / expired / malformed → reject.
-      const code = verified.reason === "expired" ? "expired" : "expired";
+      // Distinct error codes (QA P1-1) — the login form renders the
+      // right banner, and ops can search Vercel logs for the actual
+      // failure mode instead of just "expired" everywhere.
+      const code =
+        verified.reason === "expired"
+          ? "expired"
+          : verified.reason === "invalid-signature"
+            ? "invalid_signature"
+            : "malformed";
       return loginRedirect(req, code);
     }
-    // Use the verified payload directly — defence in depth: even if
-    // someone tampered with the role claim after signing, the
-    // verification above would have rejected it.
     const role =
       typeof verified.payload.role === "string" ? verified.payload.role : null;
     if (!isOperatorJwtRole(role)) {
@@ -110,21 +123,30 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // ── Fallback: payload-only validation ──────────────────────────
-  //
-  // Used when JWT_SECRET isn't configured (transitional / local dev
-  // environments). The Java backend's signature check on every
-  // authenticated call is still the wall against forgery — this
-  // just makes the middleware more permissive in dev.
-  if (!isTokenStructurallyValid(token)) {
-    return loginRedirect(req, "expired");
+  // ── No secret configured ─────────────────────────────────────────
+  if (process.env.ALLOW_PAYLOAD_ONLY_AUTH === "true") {
+    // Dev / staging opt-in only. Java's signature check is still the
+    // wall against forgery; this just lets `pnpm dev` work without
+    // copying the secret around. NEVER true in production.
+    if (process.env.NODE_ENV === "production") {
+      // Belt-and-braces: even if someone toggles the env var on prod,
+      // refuse to honour it. Defence in depth.
+      return loginRedirect(req, "misconfigured");
+    }
+    if (!isTokenStructurallyValid(token)) {
+      return loginRedirect(req, "expired");
+    }
+    const payload = decodeJwtPayload(token);
+    const role = typeof payload?.role === "string" ? payload.role : null;
+    if (!isOperatorJwtRole(role)) {
+      return loginRedirect(req, "role");
+    }
+    return NextResponse.next();
   }
-  const payload = decodeJwtPayload(token);
-  const role = typeof payload?.role === "string" ? payload.role : null;
-  if (!isOperatorJwtRole(role)) {
-    return loginRedirect(req, "role");
-  }
-  return NextResponse.next();
+
+  // No secret AND no opt-in: reject loudly. Better than a silent
+  // bypass that hides a misconfig until someone notices in prod.
+  return loginRedirect(req, "misconfigured");
 }
 
 /**
