@@ -251,31 +251,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ── Silent token refresh ────────────────────────────────────
+  //
+  // QA NEW-3 — refresh failures now distinguish "token genuinely
+  // revoked" from "Java temporarily unreachable":
+  //
+  //   • 401 / 403           → token rejected by Java. Logout + redirect.
+  //   • 5xx / network / abort → transient. Retry with exponential
+  //                           backoff (1s, 2s, 4s, 8s — total ≤ 15s),
+  //                           THEN logout only if all retries fail.
+  //                           Stops a 4-second Railway cold-start
+  //                           during a scheduled refresh from kicking
+  //                           the user out of a long-running session.
+  //
+  // The retry stays inside `silentRefresh` so the caller (proactive
+  // schedule OR an authFetch 401-retry path) doesn't need to know
+  // the difference.
   const silentRefresh = useCallback(async (): Promise<string | null> => {
     const storedRefresh = localStorage.getItem(REFRESH_KEY);
     if (!storedRefresh) return null;
-    try {
-      // Use the BFF proxy (/api/auth/refresh) so the browser never calls Java
-      // directly — avoids NEXT_PUBLIC_JAVA_API_URL dependency and CORS issues.
-      const res = await fetch("/api/auth/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken: storedRefresh }),
-        signal: makeSignal(10_000),
-      });
-      if (!res.ok) throw new Error("Refresh failed");
-      const data: { accessToken: string } = await res.json();
-      localStorage.setItem(TOKEN_KEY, data.accessToken);
-      setAccessToken(data.accessToken);
-      return data.accessToken;
-    } catch {
-      // Refresh token expired, invalid, or backend offline — force logout immediately
-      clearStorage();
-      setUser(null);
-      setAccessToken(null);
-      router.push("/login");
-      return null;
+
+    const RETRY_DELAYS_MS = [1000, 2000, 4000, 8000];
+    let lastFailureWasTerminal = false;
+
+    for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+      try {
+        const res = await fetch("/api/auth/refresh", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ refreshToken: storedRefresh }),
+          // Tight per-attempt timeout; the retry loop is the
+          // budget mechanism.
+          signal: makeSignal(6_000),
+        });
+        if (res.ok) {
+          const data: { accessToken: string } = await res.json();
+          localStorage.setItem(TOKEN_KEY, data.accessToken);
+          setAccessToken(data.accessToken);
+          return data.accessToken;
+        }
+        // 4xx — Java rejected the refresh. Token is dead; no
+        // point retrying. Break out and logout below.
+        if (res.status >= 400 && res.status < 500) {
+          lastFailureWasTerminal = true;
+          break;
+        }
+        // 5xx — Java is up but unhappy (cold start, DB blip).
+        // Fall through to the backoff delay.
+      } catch {
+        // AbortError / network error / DNS — treat as transient.
+      }
+      // Backoff before the next attempt, if any remain.
+      if (attempt < RETRY_DELAYS_MS.length) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt]));
+      }
     }
+
+    // All retries exhausted, or Java terminally rejected the token.
+    if (lastFailureWasTerminal) {
+      console.warn("[AuthContext] refresh rejected by Java — logging out");
+    } else {
+      console.warn(
+        "[AuthContext] refresh failed after retries — logging out (Java unreachable)",
+      );
+    }
+    clearStorage();
+    setUser(null);
+    setAccessToken(null);
+    router.push("/login");
+    return null;
   }, [router]);
 
   // ── Load persisted session on mount ────────────────────────
