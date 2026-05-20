@@ -5,9 +5,15 @@ import { usePathname, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 
 import { useAuth } from "@/lib/AuthContext";
-import { useTheme } from "@/lib/ThemeContext";
+// useTheme import dropped — no consumer left in this file after the
+// SensorStreamProvider removal. Theme is still applied via the global
+// ThemeProvider in app/layout.tsx.
 import { canAccessPage, isOperatorRole } from "@/lib/permissions";
-import { SensorStreamProvider } from "@/components/providers/SensorStreamProvider";
+// SensorStreamProvider was the legacy Java-backed SSE consumer
+// (/api/sse/sensors). The CRM moved to FloodWatch IoT (IoTEventProvider
+// mounted in app/layout.tsx) in Phase 5 and the legacy provider's only
+// remaining job was leaking a 502-looping EventSource on every authed
+// page. Removed.
 
 // Dynamically import AppShell with no SSR to prevent prerender issues
 const AppShell = dynamic(() => import("./AppShell"), {
@@ -112,7 +118,6 @@ export default function AppShellWrapper({ children }: AppShellWrapperProps) {
     isProfileSynthesized,
     refreshProfile,
   } = useAuth();
-  const { isDark } = useTheme();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -205,28 +210,25 @@ export default function AppShellWrapper({ children }: AppShellWrapperProps) {
     );
   }
 
-  // Show AppShell with access denied message if user doesn't have permission
+  // Show AppShell with access denied message if user doesn't have permission.
+  // Live alerts come via `<IoTEventProvider>` mounted in app/layout.tsx
+  // (FloodWatch IoT stream); the legacy SensorStreamProvider that used
+  // to wrap here was removed because its only side-effect was hammering
+  // the dead /api/sse/sensors endpoint with 502s on every page load.
   if (!hasPageAccess) {
     return (
-      <SensorStreamProvider isDark={isDark}>
-        <AppShell>
-          <AccessDenied />
-        </AppShell>
-      </SensorStreamProvider>
+      <AppShell>
+        <AccessDenied />
+      </AppShell>
     );
   }
 
-  // Wrap the authed shell with the real-time flood-alert stream so the
-  // top-right notification dock + audio chime + browser Notification
-  // surface flood alerts on every CRM page (Dashboard, Sensors, Map, etc.)
   return (
-    <SensorStreamProvider isDark={isDark}>
-      <AppShell>
-        {isProfileSynthesized && (
-          <ServiceWarmingBanner onRetry={refreshProfile} />
-        )}
-        {children}
-      </AppShell>
-    </SensorStreamProvider>
+    <AppShell>
+      {isProfileSynthesized && (
+        <ServiceWarmingBanner onRetry={refreshProfile} />
+      )}
+      {children}
+    </AppShell>
   );
 }
