@@ -19,9 +19,38 @@
 // attaches Set-Cookie, and 303s onward.
 
 import { NextRequest, NextResponse } from "next/server";
+import { ACCESS_COOKIE, REFRESH_COOKIE } from "@/lib/authCookies";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+/**
+ * Defensive cookie sweep before we hand off to the redeem endpoint.
+ *
+ * If the user is arriving at /auth/callback?code=… they're starting
+ * a fresh SSO handoff. Any cookies currently sitting in their browser
+ * for this domain are from a previous attempt. If THAT previous
+ * attempt failed mid-stream (rare, but happened during the post-
+ * Railway-cutover bring-up), the browser kept sending stale
+ * `flood_crm_access` / `flood_crm_refresh` cookies that the
+ * middleware then rejected — putting the user into a "logged in but
+ * 401'd" loop with no obvious recovery.
+ *
+ * Clearing them on the 307 response (BEFORE the redeem runs) means:
+ *
+ *   - If redeem succeeds, it overwrites with fresh values on its
+ *     303 to /dashboard → user lands clean.
+ *   - If redeem fails, the user lands on /login?error=… with no
+ *     stale cookies left over → the next attempt starts truly fresh.
+ *
+ * Costs ~0 bytes; eliminates a class of impossible-to-debug login
+ * loops.
+ */
+function attachStaleCookieClear(res: NextResponse): NextResponse {
+  res.cookies.delete(ACCESS_COOKIE);
+  res.cookies.delete(REFRESH_COOKIE);
+  return res;
+}
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -36,12 +65,16 @@ export async function GET(req: NextRequest) {
     target.searchParams.set("at", at);
     target.searchParams.set("rt", rt);
   } else {
-    return NextResponse.redirect(
-      new URL("/login?error=callback", url.origin),
-      303,
+    return attachStaleCookieClear(
+      NextResponse.redirect(
+        new URL("/login?error=callback", url.origin),
+        303,
+      ),
     );
   }
 
   // 307 preserves the GET method and forwards the query string.
-  return NextResponse.redirect(target, 307);
+  // Stale cookies get cleared on this same response so the redeem
+  // step starts with a clean slate.
+  return attachStaleCookieClear(NextResponse.redirect(target, 307));
 }
