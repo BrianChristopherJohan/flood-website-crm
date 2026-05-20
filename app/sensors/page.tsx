@@ -105,7 +105,7 @@ const columns: { key: keyof SensorTableRow; label: string; sortable?: boolean }[
 
 export default function SensorsPage() {
   const { isDark } = useTheme();
-  const { accessToken, silentRefresh } = useAuth();
+  const { accessToken, user, silentRefresh } = useAuth();
   const { canExport, canManageSensors, role } = usePermissions();
   const [nodes, setNodes] = useState<NodeData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -147,10 +147,19 @@ export default function SensorsPage() {
   // strictly required for the fetch, but we keep it as the
   // authentication-state signal for the page.
   const fetchNodes = useCallback(async () => {
-    if (!accessToken) { setIsLoading(false); return; }
+    // Authenticated via httpOnly cookie or legacy bearer — either is fine.
+    // `/api/iot/zones` is the public BFF, but we still require an
+    // authenticated user so anonymous visitors can't drive refetches.
+    if (!user && !accessToken) { setIsLoading(false); return; }
     if (isFirstFetch.current) setIsLoading(true);
     try {
-      const response = await fetch("/api/iot/zones", { cache: "no-store" });
+      // Forward any `?dataset=` URL param so demo / QA can flip
+      // between `real` (production LoRa) and `sample` (the FloodWatch
+      // Pitas simulator) without an env-var change.
+      const search = typeof window !== "undefined" ? window.location.search : "";
+      const dsMatch = search.match(/[?&]dataset=([^&]+)/);
+      const qs = dsMatch ? `?dataset=${encodeURIComponent(dsMatch[1])}` : "";
+      const response = await fetch(`/api/iot/zones${qs}`, { cache: "no-store" });
       if (!response.ok) throw new Error("Failed to fetch sensor zones");
       const zones = (await response.json()) as Zone[];
       if (!Array.isArray(zones)) throw new Error("Unexpected zones payload");
@@ -163,13 +172,13 @@ export default function SensorsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken]);
+  }, [accessToken, user]);
 
   // Initial fetch
   useEffect(() => {
-    if (!accessToken) return;
+    if (!user && !accessToken) return;
     fetchNodes();
-  }, [accessToken, fetchNodes]);
+  }, [user, accessToken, fetchNodes]);
 
   // Live updates via the IoT event provider (mounted in app/layout.tsx).
   // Replaces the legacy /api/sse/sensors stream which proxied the Java
@@ -183,7 +192,7 @@ export default function SensorsPage() {
   }, [fetchNodes]);
 
   useEffect(() => {
-    if (!accessToken || !autoRefresh) return;
+    if ((!user && !accessToken) || !autoRefresh) return;
     let scheduled: ReturnType<typeof setTimeout> | null = null;
     const scheduleRefetch = () => {
       if (scheduled) return;
@@ -205,7 +214,7 @@ export default function SensorsPage() {
       unsub?.();
       if (scheduled) clearTimeout(scheduled);
     };
-  }, [accessToken, autoRefresh, subscribeIoT]);
+  }, [user, accessToken, autoRefresh, subscribeIoT]);
 
   // Transform nodes to table rows
   const tableRows: SensorTableRow[] = useMemo(() => {

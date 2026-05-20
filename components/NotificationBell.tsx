@@ -11,12 +11,19 @@
  * operators the bell + sound experience without the SSE plumbing.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/AuthContext";
 import { authFetch } from "@/lib/authFetch";
 import { useTheme } from "@/lib/theme/ThemeProvider";
+import {
+  alertBody,
+  alertKey,
+  alertSeverity,
+  alertTitle,
+  useIoTStream,
+} from "@/components/providers/IoTEventProvider";
 
 type Notification = {
   id: string;
@@ -27,6 +34,9 @@ type Notification = {
   severity: "info" | "warning" | "critical" | string;
   readAt: string | null;
   createdAt: string;
+  /** True when this row was synthesised from a live IoT alert; backend
+   *  read/dismiss endpoints don't apply. */
+  iotEphemeral?: boolean;
 };
 
 type Page<T> = {
@@ -36,7 +46,7 @@ type Page<T> = {
 const POLL_MS = 20_000;
 
 export default function NotificationBell() {
-  const { accessToken, silentRefresh } = useAuth();
+  const { accessToken, user, silentRefresh } = useAuth();
   const { isDark } = useTheme();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<Notification[]>([]);
@@ -46,6 +56,36 @@ export default function NotificationBell() {
   const userInteracted = useRef(false);
   const audioCtx = useRef<AudioContext | null>(null);
   const lastCount = useRef(0);
+
+  // Live IoT alerts also land in the dropdown so operators have one
+  // place to triage notifications. The IoT stream is ephemeral
+  // client-side state — there's no backend row to mark-read against,
+  // so we track "seen-in-bell" with an in-memory set keyed off the
+  // alert's stable `alertKey()`.
+  const iot = useIoTStream();
+  const [seenIotKeys, setSeenIotKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
+
+  const iotItems = useMemo<Notification[]>(
+    () =>
+      iot.alerts.map((a) => {
+        const k = alertKey(a);
+        return {
+          id: `iot:${k}`,
+          kind: "iot_alert",
+          title: alertTitle(a),
+          body: alertBody(a),
+          // CRM operator deep-link to /map (community uses /flood-map).
+          link: `/map?focus=${encodeURIComponent(a.node_id)}`,
+          severity: alertSeverity(a),
+          createdAt: a.timestamp,
+          readAt: seenIotKeys.has(k) ? a.timestamp : null,
+          iotEphemeral: true,
+        };
+      }),
+    [iot.alerts, seenIotKeys],
+  );
 
   // Capture user-interaction so the bell sound is allowed to play.
   useEffect(() => {
@@ -122,6 +162,41 @@ export default function NotificationBell() {
     });
   }, [accessToken, fetchList, fetchUnread]);
 
+  // Combined view: backend Notifications + live IoT alerts. Sorted
+  // newest-first so a fresh sensor event jumps to the top alongside
+  // any unseen Java notifications.
+  const mergedItems = useMemo<Notification[]>(() => {
+    const merged = [...items, ...iotItems];
+    merged.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    // Cap to a reasonable dropdown length so a long-running session
+    // doesn't grow the DOM unbounded.
+    return merged.slice(0, 40);
+  }, [items, iotItems]);
+
+  // Total unread = backend unread + IoT alerts not yet seen-in-bell.
+  const iotUnread = useMemo(
+    () => iot.alerts.filter((a) => !seenIotKeys.has(alertKey(a))).length,
+    [iot.alerts, seenIotKeys],
+  );
+  const totalUnread = unread + iotUnread;
+
+  // Auto-play bell sound when a new IoT alert arrives while bell is
+  // closed — same UX as a new backend notification.
+  const lastIotCount = useRef(0);
+  useEffect(() => {
+    if (iot.alerts.length > lastIotCount.current && !open) {
+      // First mount: don't chime for the backfill of any retained alerts.
+      if (lastIotCount.current !== 0) playBell();
+    }
+    lastIotCount.current = iot.alerts.length;
+    // playBell is stable (useCallback []), so omitting it from deps
+    // is intentional — adding it would re-fire on identity changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [iot.alerts.length, open]);
+
   // Poll for new alerts
   useEffect(() => {
     if (!accessToken) return;
@@ -192,12 +267,33 @@ export default function NotificationBell() {
     if (!accessToken) return;
     setItems(prev => prev.map(n => n.readAt ? n : { ...n, readAt: new Date().toISOString() }));
     setUnread(0);
+    // Also mark every visible IoT alert as seen so the badge clears.
+    setSeenIotKeys((prev) => {
+      const next = new Set(prev);
+      for (const a of iot.alerts) next.add(alertKey(a));
+      return next;
+    });
     try {
       await authFetch("/api/notifications/read-all", accessToken, silentRefresh, { method: "POST" });
     } catch { /* optimistic */ }
   }
 
-  if (!accessToken) return null;
+  // Mark an IoT alert as seen-in-bell. There's no backend row to POST
+  // to — these are client-side ephemera — so it's just a local set.
+  const markIotSeen = useCallback((iotKey: string) => {
+    setSeenIotKeys((prev) => {
+      if (prev.has(iotKey)) return prev;
+      const next = new Set(prev);
+      next.add(iotKey);
+      return next;
+    });
+  }, []);
+
+  // Both the localStorage-token path AND the cookie-only SSO path
+  // count as "signed in". Hiding the bell on the cookie path was a
+  // regression — operators arriving via /auth/callback would lose the
+  // notification UI even though they're authenticated.
+  if (!accessToken && !user) return null;
 
   return (
     <div ref={wrapperRef} className="relative">
@@ -206,9 +302,20 @@ export default function NotificationBell() {
         onClick={() => {
           const next = !open;
           setOpen(next);
-          if (next) void fetchList();
+          if (next) {
+            // Opening the dropdown marks all currently visible IoT
+            // alerts as seen so the badge clears once the operator
+            // has had a chance to look. Backend rows still need an
+            // explicit row-level read (handled in Row).
+            setSeenIotKeys((prev) => {
+              const ns = new Set(prev);
+              for (const a of iot.alerts) ns.add(alertKey(a));
+              return ns;
+            });
+            void fetchList();
+          }
         }}
-        aria-label={`Notifications${unread > 0 ? ` — ${unread} unread` : ""}`}
+        aria-label={`Notifications${totalUnread > 0 ? ` — ${totalUnread} unread` : ""}`}
         aria-expanded={open}
         className={`relative flex h-10 w-10 sm:h-11 sm:w-11 shrink-0 items-center justify-center rounded-full border transition ${
           isDark
@@ -217,9 +324,9 @@ export default function NotificationBell() {
         }`}
       >
         <BellIcon className="h-5 w-5" />
-        {unread > 0 && (
+        {totalUnread > 0 && (
           <span className="absolute right-1 top-1 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
-            {unread > 99 ? "99+" : unread}
+            {totalUnread > 99 ? "99+" : totalUnread}
           </span>
         )}
       </button>
@@ -237,20 +344,31 @@ export default function NotificationBell() {
           <div className={`flex items-center justify-between border-b px-4 py-3 ${
             isDark ? "border-dark-border" : "border-light-grey"
           }`}>
-            <p className="text-sm font-bold">Notifications</p>
-            {unread > 0 && (
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-bold">Notifications</p>
+              {iot.status === "open" && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-bold text-emerald-500"
+                  title="Live IoT stream connected"
+                >
+                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" aria-hidden />
+                  LIVE
+                </span>
+              )}
+            </div>
+            {totalUnread > 0 && (
               <button type="button" onClick={() => void markAllRead()} className="text-[11px] font-semibold text-primary-blue hover:opacity-80">
                 Mark all read
               </button>
             )}
           </div>
           <div className="max-h-[60vh] overflow-y-auto">
-            {loading && items.length === 0 && (
+            {loading && mergedItems.length === 0 && (
               <p className={`px-4 py-6 text-center text-xs ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
                 Loading…
               </p>
             )}
-            {!loading && items.length === 0 && (
+            {!loading && mergedItems.length === 0 && (
               <div className="px-4 py-8 text-center">
                 <BellIcon className={`mx-auto mb-2 h-7 w-7 ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/40"}`} />
                 <p className={`text-xs ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
@@ -259,12 +377,19 @@ export default function NotificationBell() {
               </div>
             )}
             <ul>
-              {items.map(n => (
+              {mergedItems.map((n) => (
                 <li key={n.id}>
                   <Row
                     notification={n}
                     isDark={isDark}
-                    onMarkRead={() => markRead(n.id)}
+                    onMarkRead={async () => {
+                      if (n.iotEphemeral) {
+                        // Strip the "iot:" prefix to get the alertKey
+                        markIotSeen(n.id.replace(/^iot:/, ""));
+                      } else {
+                        await markRead(n.id);
+                      }
+                    }}
                     onClose={() => setOpen(false)}
                   />
                 </li>
