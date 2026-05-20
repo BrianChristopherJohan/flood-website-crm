@@ -271,7 +271,7 @@ const AUTO_DISMISS_MS: Record<AlertSeverity, number> = {
 };
 
 /** Max toasts the dock renders in collapsed mode; rest behind "+N more". */
-const DOCK_VISIBLE_CAP = 8;
+const DOCK_VISIBLE_CAP = 3;
 
 function IoTSensorAlertDock({
   alerts,
