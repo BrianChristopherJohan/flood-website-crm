@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 
 import {
+  Autocomplete,
   GoogleMap,
   InfoWindow,
   Marker,
@@ -20,7 +21,7 @@ import { NodeData, getStatusLabel, getMarkerColor } from "@/lib/types";
  * — `useJsApiLoader` re-creates the script tag on every render if a
  * new array slot is passed in.
  */
-const MAPS_LIBRARIES: Libraries = ["geometry", "marker"];
+const MAPS_LIBRARIES: Libraries = ["geometry", "marker", "places"];
 
 type NodeMapProps = {
   nodes: NodeData[];
@@ -79,6 +80,20 @@ export default function NodeMap({
   const [lastFocusedNodeId, setLastFocusedNodeId] = useState<string | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
 
+  // ── Places Autocomplete search box (ported from community) ───────────────
+  // Mounts a Google Places Autocomplete on the map header. When the admin
+  // picks a suggestion, we pan the camera, drop a teardrop pin at the
+  // chosen coords, and surface its name + reverse-geocoded address +
+  // count of nearby flood sensors. Keeps the operator console at parity
+  // with the public site's place-search affordance.
+  const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchedPlace, setSearchedPlace] = useState<
+    | { lat: number; lng: number; name: string; address: string | null }
+    | null
+  >(null);
+  const [searchedPlaceClicked, setSearchedPlaceClicked] = useState(false);
+
   const { isLoaded, loadError } = useJsApiLoader({
     id: "google-map-script",
     googleMapsApiKey: apiKey,
@@ -130,6 +145,28 @@ export default function NodeMap({
   }, []); // intentionally computed only on mount — we do NOT want re-centering on data refresh
 
   const activeNode = nodes.find(n => n._id === activeNodeId);
+
+  // Fired when the admin picks a Google Places suggestion from the
+  // Autocomplete dropdown. Pans the camera, drops a teardrop marker
+  // at the chosen coords, and opens its InfoWindow.
+  const handlePlaceChanged = useCallback(() => {
+    const ac = autocompleteRef.current;
+    if (!ac) return;
+    const place = ac.getPlace();
+    if (!place.geometry?.location) return;
+    const lat = place.geometry.location.lat();
+    const lng = place.geometry.location.lng();
+    const name =
+      place.name ?? place.formatted_address ?? "Selected location";
+    const address = place.formatted_address ?? null;
+    if (mapRef.current) {
+      mapRef.current.panTo({ lat, lng });
+      mapRef.current.setZoom(14);
+    }
+    setSearchInput(name);
+    setSearchedPlace({ lat, lng, name, address });
+    setSearchedPlaceClicked(true);
+  }, []);
 
   // ── Reverse-geocoded street address for the currently-open popup ─────────
   // The Google Maps Geocoder uses the same JS API key already loaded for the
@@ -307,18 +344,120 @@ export default function NodeMap({
   }
 
   return (
-    <GoogleMap
-      mapContainerStyle={{ width: "100%", height, borderRadius: "16px" }}
-      center={mapCenter}
-      zoom={zoom}
-      options={{
-        disableDefaultUI: true,
-        zoomControl: true,
-        styles: mapStyles,
-        gestureHandling: "greedy",
-      }}
-      onLoad={onMapLoad}
-    >
+    <div style={{ position: "relative", width: "100%", height }}>
+      {/* ── Places Autocomplete search box (top-left overlay) ─────────────
+          Mirrors the community map's place-search UX so admins can jump
+          to any address. The Autocomplete is restricted to Malaysia +
+          biased to the current map centre so suggestions stay relevant.
+      */}
+      <div
+        style={{
+          position: "absolute",
+          top: 12,
+          left: 12,
+          zIndex: 10,
+          maxWidth: "calc(100% - 24px)",
+          width: 320,
+          pointerEvents: "none",
+        }}
+      >
+        <div
+          style={{
+            pointerEvents: "auto",
+            background: "#fff",
+            borderRadius: 999,
+            boxShadow: "0 4px 12px -2px rgba(0,0,0,0.18)",
+            display: "flex",
+            alignItems: "center",
+            paddingRight: 4,
+          }}
+        >
+          <Autocomplete
+            onLoad={(ac) => {
+              autocompleteRef.current = ac;
+              // Bias suggestions to the map's current viewport so a
+              // "Jalan Song" near Kuching outranks the same name across MY.
+              if (mapRef.current && typeof google !== "undefined") {
+                const c = mapRef.current.getCenter();
+                if (c) {
+                  const bounds = new google.maps.LatLngBounds(c, c);
+                  ac.setBounds(bounds);
+                }
+              }
+            }}
+            onPlaceChanged={handlePlaceChanged}
+            options={{
+              componentRestrictions: { country: ["my"] },
+              fields: ["geometry", "name", "formatted_address"],
+            }}
+          >
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => {
+                const v = e.target.value;
+                setSearchInput(v);
+                if (v.trim() === "") setSearchedPlace(null);
+              }}
+              placeholder="Search a place…"
+              aria-label="Search for a place"
+              style={{
+                width: "100%",
+                padding: "10px 16px",
+                fontSize: 14,
+                color: "#0f172a",
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                borderRadius: 999,
+              }}
+            />
+          </Autocomplete>
+          {(searchInput.length > 0 || searchedPlace) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchInput("");
+                setSearchedPlace(null);
+                setSearchedPlaceClicked(false);
+              }}
+              aria-label="Clear search"
+              style={{
+                marginLeft: 4,
+                width: 28,
+                height: 28,
+                borderRadius: 999,
+                background: "transparent",
+                border: "none",
+                color: "#94a3b8",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"
+                   style={{ width: 14, height: 14 }}>
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+
+      <GoogleMap
+        mapContainerStyle={{ width: "100%", height, borderRadius: "16px" }}
+        center={mapCenter}
+        zoom={zoom}
+        options={{
+          disableDefaultUI: true,
+          zoomControl: true,
+          styles: mapStyles,
+          gestureHandling: "greedy",
+        }}
+        onLoad={onMapLoad}
+      >
       {nodes.map((node) => {
         const isHighlighted = highlightedIds?.has(node._id) || latestUpdatedNode?._id === node._id;
         const color = getMarkerColor(node);
@@ -534,6 +673,99 @@ export default function NodeMap({
           </div>
         </InfoWindow>
       )}
+      {/* ── Searched place: pin + InfoWindow ───────────────────────────── */}
+      {searchedPlace && (
+        <>
+          <Marker
+            position={{ lat: searchedPlace.lat, lng: searchedPlace.lng }}
+            icon={{
+              // Blue teardrop to distinguish a searched address from a sensor pin.
+              path: "M 0,0 C -2,-20 -10,-22 -10,-30 A 10,10 0 1,1 10,-30 C 10,-22 2,-20 0,0 z",
+              fillColor: "#2563eb",
+              fillOpacity: 1,
+              strokeColor: "#1e3a8a",
+              strokeWeight: 1.5,
+              scale: 1.1,
+              anchor: new google.maps.Point(0, 0),
+            }}
+            zIndex={20}
+            onClick={() => setSearchedPlaceClicked((p) => !p)}
+          />
+          {searchedPlaceClicked && (() => {
+            // Count sensors within a default radius so the admin sees
+            // immediately how many flood pins surround the chosen address.
+            // Same haversine formula the saved-places panel uses.
+            const R_M = 6371_000;
+            const toRad = (d: number) => (d * Math.PI) / 180;
+            const radiusKm = 3;
+            const counts = nodes.reduce(
+              (acc, n) => {
+                const dLat = toRad(n.latitude - searchedPlace.lat);
+                const dLng = toRad(n.longitude - searchedPlace.lng);
+                const a =
+                  Math.sin(dLat / 2) ** 2 +
+                  Math.cos(toRad(searchedPlace.lat)) *
+                    Math.cos(toRad(n.latitude)) *
+                    Math.sin(dLng / 2) ** 2;
+                const dM = 2 * R_M * Math.asin(Math.sqrt(a));
+                if (dM > radiusKm * 1000) return acc;
+                acc.total++;
+                if (n.is_dead) acc.offline++;
+                else if (n.current_level >= 3) acc.critical++;
+                else if (n.current_level === 2) acc.warning++;
+                else if (n.current_level === 1) acc.alert++;
+                else acc.normal++;
+                return acc;
+              },
+              { total: 0, normal: 0, alert: 0, warning: 0, critical: 0, offline: 0 },
+            );
+            return (
+              <InfoWindow
+                position={{ lat: searchedPlace.lat, lng: searchedPlace.lng }}
+                onCloseClick={() => setSearchedPlaceClicked(false)}
+                options={{
+                  pixelOffset: new google.maps.Size(0, -34),
+                  disableAutoPan: false,
+                }}
+              >
+                <div style={{ minWidth: 240, padding: "2px 2px 4px", fontFamily: "inherit" }}>
+                  <p style={{
+                    fontWeight: 700, fontSize: 13, color: "#1a1a1a",
+                    margin: 0, marginBottom: 4,
+                  }}>
+                    {searchedPlace.name}
+                  </p>
+                  {searchedPlace.address && (
+                    <p style={{ fontSize: 11, color: "#6b7280", margin: 0, marginBottom: 8, lineHeight: 1.4 }}>
+                      {searchedPlace.address}
+                    </p>
+                  )}
+                  <div style={{
+                    background: "#f3f4f6", borderRadius: 8,
+                    padding: "6px 8px", marginBottom: 6, fontSize: 11, color: "#374151",
+                  }}>
+                    <strong>{counts.total}</strong> sensor{counts.total === 1 ? "" : "s"} within {radiusKm} km
+                    {counts.total > 0 && (
+                      <>
+                        {" · "}
+                        <span style={{ color: "#16a34a" }}>{counts.normal} normal</span>
+                        {counts.alert > 0 && <>{" · "}<span style={{ color: "#f59e0b" }}>{counts.alert} alert</span></>}
+                        {counts.warning > 0 && <>{" · "}<span style={{ color: "#f97316" }}>{counts.warning} warning</span></>}
+                        {counts.critical > 0 && <>{" · "}<span style={{ color: "#dc2626" }}>{counts.critical} critical</span></>}
+                        {counts.offline > 0 && <>{" · "}<span style={{ color: "#94a3b8" }}>{counts.offline} offline</span></>}
+                      </>
+                    )}
+                  </div>
+                  <p style={{ fontSize: 10, color: "#9ca3af", margin: 0 }}>
+                    {searchedPlace.lat.toFixed(6)}°N, {searchedPlace.lng.toFixed(6)}°E
+                  </p>
+                </div>
+              </InfoWindow>
+            );
+          })()}
+        </>
+      )}
     </GoogleMap>
+    </div>
   );
 }

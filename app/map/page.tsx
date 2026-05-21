@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import NodeMap from "@/components/map/NodeMap";
+import SavedPlacesPanel from "@/components/map/SavedPlacesPanel";
 import { useTheme } from "@/lib/ThemeContext";
 import { NodeData, type FloodLevel, type Zone } from "@/lib/types";
 import type { IoTNode } from "@/lib/floodwatch/types";
@@ -801,6 +802,34 @@ export default function FloodMapPage() {
                 so the operator gets severity + description + count in one
                 place. See <STATUS_LEGEND map> below. */}
           </article>
+
+          {/* My Saved Places — operator bookmarks with radius-based
+              node-count badges. localStorage-backed; no Java round-trip. */}
+          <SavedPlacesPanel
+            nodes={nodes}
+            onFocusPlace={(lat, lng) => {
+              // Reuse the same "focus a sensor" pipeline via a synthetic node
+              // anchor. The map's onMapLoad already pans to the first set of
+              // nodes; explicit focusNode on a non-node lat/lng isn't wired
+              // through, so fall back to a window-level event the page can
+              // listen for. Simplest path: directly pan via the URL hash so
+              // the map's setFocus effect picks it up. Future work.
+              if (typeof window !== "undefined") {
+                window.scrollTo({ top: 0, behavior: "smooth" });
+                window.dispatchEvent(
+                  new CustomEvent("crm-map-focus-coord", {
+                    detail: { lat, lng },
+                  }),
+                );
+              }
+            }}
+            defaultCentre={
+              nodes.length > 0
+                ? { lat: nodes[0].latitude, lng: nodes[0].longitude }
+                : { lat: 1.553, lng: 110.344 }
+            }
+            isDark={isDark}
+          />
 
           {/* All-nodes grid */}
           <article className={card}>
