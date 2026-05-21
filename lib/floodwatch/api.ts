@@ -21,22 +21,17 @@ export const FLOODWATCH_API_BASE = (
 ).replace(/\/$/, "");
 
 /**
- * Default dataset selector — defaults to `all` (not `real`).
+ * Default dataset selector — `real`.
  *
- * The upstream `real` dataset currently contains only three dead test
- * devices from a previous FYP team (flat batteries, weeks-old data).
- * The actively-transmitting deployment lives in `sample` (22 simulator
- * nodes under SIM-PITAS-SOSOP + SIM-PITAS-MANDAMAI per the API docs).
+ * Per FloodWatch API docs: `dataset=real` returns "Live sensor data
+ * only — documents without `is_sample` flag". This is the canonical
+ * production data the CRM is supposed to show operators.
  *
- * `all` is the safest default for an FYP demo: surfaces live simulator
- * activity now AND will automatically pick up any new real hardware
- * that registers later, with no env-var flip needed.
- *
- * Override via FLOODWATCH_DATASET on Vercel/Railway if you want to pin
- * to a specific dataset.
+ * If your hardware triggers but no fresh data appears here, the issue
+ * is upstream — the website only renders what the FastAPI returns.
  */
 export const DEFAULT_DATASET: Dataset =
-  (process.env.FLOODWATCH_DATASET as Dataset) ?? "all";
+  (process.env.FLOODWATCH_DATASET as Dataset) ?? "real";
 
 type Params = Record<string, string | number | boolean | undefined>;
 
