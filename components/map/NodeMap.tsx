@@ -379,10 +379,10 @@ export default function NodeMap({
                   {new Date(activeNode.last_updated).toLocaleString("en-GB", {
                     dateStyle: "short",
                     timeStyle: "short",
-                    timeZone: "UTC",
+                    timeZone: "Asia/Kuala_Lumpur",
                     hour12: false,
                   })}{" "}
-                  GMT
+                  MYT
                 </span>
               </div>
             </div>
