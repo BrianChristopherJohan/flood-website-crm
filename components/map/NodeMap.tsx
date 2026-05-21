@@ -376,9 +376,13 @@ export default function NodeMap({
               <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14 }}>
                 Last Updated:{" "}
                 <span style={{ fontWeight: 500 }}>
-                  {new Date(activeNode.last_updated).toLocaleString("en-MY", {
-                    dateStyle: "short", timeStyle: "short",
-                  })}
+                  {new Date(activeNode.last_updated).toLocaleString("en-GB", {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                    timeZone: "UTC",
+                    hour12: false,
+                  })}{" "}
+                  GMT
                 </span>
               </div>
             </div>
