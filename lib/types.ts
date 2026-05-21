@@ -33,7 +33,11 @@ export type Zone = {
   lastUpdated?: string;
 };
 
-// Node type definition based on MongoDB schema
+// Node type definition based on MongoDB schema, extended with optional
+// raw-telemetry fields that the CRM operator console now surfaces in
+// the map InfoWindow (battery, signal, village, etc.).
+// Community-side renders never use these because they hydrate from the
+// privacy-aggregated /api/iot/zones route which strips them upstream.
 export interface NodeData {
   _id: string;
   node_id: string;
@@ -47,6 +51,16 @@ export interface NodeData {
   is_dead: boolean; // false = alive, true = dead
   last_updated: Date | string;
   created_at: Date | string;
+  // ── optional raw-telemetry fields (CRM-only, populated by
+  //    iotNodeToNodeData; undefined when the data source is the
+  //    privacy-aggregated /api/iot/zones route) ─────────────────────
+  village_id?: string;       // e.g. "SIM-PITAS-SOSOP" or real village id
+  battery_voltage?: number;  // volts, typical Li-Ion range 3.3-4.2
+  float_bits?: number;       // raw float-switch bitmask 0..7
+  rssi?: number;             // LoRa received signal strength dBm
+  snr?: number;              // LoRa signal-to-noise ratio dB
+  gps_fix?: boolean;         // whether lat/lng came from a live GPS lock
+  parent_id?: string;        // LoRa relay (master or upstream node)
 }
 
 // Helper function to determine water level status

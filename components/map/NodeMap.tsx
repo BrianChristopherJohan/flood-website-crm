@@ -131,6 +131,42 @@ export default function NodeMap({
 
   const activeNode = nodes.find(n => n._id === activeNodeId);
 
+  // ── Reverse-geocoded street address for the currently-open popup ─────────
+  // The Google Maps Geocoder uses the same JS API key already loaded for the
+  // map, so no extra env var is needed. We cache results in a Map keyed on
+  // the rounded lat/lng so opening the same pin twice doesn't burn a quota
+  // hit. Falls back silently to "—" when geocoding fails (no result, quota,
+  // network blip) — the operator still sees raw lat/lng in the popup.
+  const geocodeCache = useRef<Map<string, string>>(new Map());
+  const [activeAddress, setActiveAddress] = useState<string | null>(null);
+  useEffect(() => {
+    if (!activeNode || !isLoaded) { setActiveAddress(null); return; }
+    const key = `${activeNode.latitude.toFixed(5)},${activeNode.longitude.toFixed(5)}`;
+    const hit = geocodeCache.current.get(key);
+    if (hit) { setActiveAddress(hit); return; }
+    setActiveAddress(null);
+    let cancelled = false;
+    try {
+      const geocoder = new google.maps.Geocoder();
+      geocoder.geocode(
+        { location: { lat: activeNode.latitude, lng: activeNode.longitude } },
+        (results, status) => {
+          if (cancelled) return;
+          if (status === "OK" && results && results[0]) {
+            const addr = results[0].formatted_address;
+            geocodeCache.current.set(key, addr);
+            setActiveAddress(addr);
+          } else {
+            setActiveAddress("—");
+          }
+        },
+      );
+    } catch {
+      setActiveAddress("—");
+    }
+    return () => { cancelled = true; };
+  }, [activeNode, isLoaded]);
+
   // Callback to store map reference + flip the readiness flag so the
   // first-load auto-fit effect re-runs once the camera is controllable.
   const [mapReady, setMapReady] = useState(false);
@@ -379,6 +415,49 @@ export default function NodeMap({
                   {activeNode.is_dead ? "Offline" : "Online"}
                 </strong>
               </div>
+              {typeof activeNode.battery_voltage === "number" && (
+                <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14 }}>
+                  Battery:{" "}
+                  <strong style={{
+                    color:
+                      activeNode.battery_voltage <= 0.5
+                        ? "#d7263d"        // dead/disconnected
+                        : activeNode.battery_voltage < 3.3
+                          ? "#ea580c"      // critical low
+                          : activeNode.battery_voltage < 3.6
+                            ? "#f59e0b"    // low
+                            : "#16a34a",   // healthy
+                  }}>
+                    {activeNode.battery_voltage.toFixed(2)} V
+                  </strong>
+                  {activeNode.battery_voltage <= 0.5
+                    ? " (replace)"
+                    : activeNode.battery_voltage < 3.3
+                      ? " (critical)"
+                      : activeNode.battery_voltage < 3.6
+                        ? " (low)"
+                        : null}
+                </div>
+              )}
+              {activeNode.village_id && (
+                <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14 }}>
+                  Village: <strong>{activeNode.village_id}</strong>
+                </div>
+              )}
+              {(typeof activeNode.rssi === "number" || typeof activeNode.snr === "number") && (
+                <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14 }}>
+                  Signal:{" "}
+                  <strong>
+                    {typeof activeNode.rssi === "number" ? `${activeNode.rssi} dBm` : "—"}
+                    {typeof activeNode.snr === "number" ? ` · SNR ${activeNode.snr.toFixed(1)} dB` : ""}
+                  </strong>
+                </div>
+              )}
+              {activeNode.parent_id && (
+                <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14 }}>
+                  Parent: <strong>{activeNode.parent_id}</strong>
+                </div>
+              )}
               <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14 }}>
                 Last Updated:{" "}
                 <span style={{ fontWeight: 500 }}>
@@ -393,13 +472,26 @@ export default function NodeMap({
               </div>
             </div>
 
-            {/* ── Coordinates ── */}
-            <p style={{
-              fontSize: 10, color: "#9ca3af", margin: "0 0 10px",
+            {/* ── Address (reverse-geocoded) + raw coords ── */}
+            <div style={{
+              margin: "0 0 10px",
               paddingTop: 6, borderTop: "1px solid #e5e7eb",
             }}>
-              {activeNode.latitude.toFixed(6)}°N, {activeNode.longitude.toFixed(6)}°E
-            </p>
+              <p style={{ fontSize: 11, color: "#374151", margin: "0 0 4px", lineHeight: 1.35 }}>
+                <span style={{ color: "#6b7280" }}>Address: </span>
+                <span>
+                  {activeAddress === null
+                    ? "Resolving…"
+                    : activeAddress === "—"
+                      ? "Address unavailable"
+                      : activeAddress}
+                </span>
+              </p>
+              <p style={{ fontSize: 10, color: "#9ca3af", margin: 0 }}>
+                {activeNode.latitude.toFixed(6)}°N, {activeNode.longitude.toFixed(6)}°E
+                {activeNode.gps_fix === false ? " · estimated (no GPS fix)" : ""}
+              </p>
+            </div>
 
             {/* ── Favourite toggle button ── */}
             {onToggleFavourite && (() => {
