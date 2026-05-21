@@ -131,8 +131,29 @@ export default function AnalyticsPage() {
         if (analyticsResult.status === "fulfilled") {
           setData(analyticsResult.value);
         } else {
-          console.error("Analytics fetch failed:", analyticsResult.reason);
-          toast.error("Failed to load analytics data.");
+          // Surface a useful message based on the BFF's structured error
+          // code rather than a generic toast. The BFF route emits one of:
+          //   missing_token | unauthorized | forbidden
+          //   service_starting | upstream_error
+          const reason = analyticsResult.reason as
+            | { code?: string; upstreamStatus?: number; message?: string }
+            | undefined;
+          const code = reason?.code;
+          const userMsg =
+            code === "service_starting"
+              ? "Service is starting up. Try again in a few seconds."
+              : code === "forbidden"
+                ? "Your account doesn't have access to analytics."
+                : code === "unauthorized" || code === "missing_token"
+                  ? "Please sign in again to view analytics."
+                  : "Failed to load analytics data.";
+          console.error(
+            "Analytics fetch failed:",
+            code ?? "(no code)",
+            reason?.upstreamStatus ?? "(no upstream status)",
+            reason?.message ?? reason,
+          );
+          toast.error(userMsg);
         }
 
         if (nodesResult.status === "fulfilled") {

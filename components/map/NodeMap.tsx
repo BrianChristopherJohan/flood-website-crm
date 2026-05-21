@@ -3,9 +3,9 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 
 import {
-  Circle,
   GoogleMap,
   InfoWindow,
+  Marker,
   type Libraries,
   useJsApiLoader,
 } from "@react-google-maps/api";
@@ -286,31 +286,32 @@ export default function NodeMap({
       {nodes.map((node) => {
         const isHighlighted = highlightedIds?.has(node._id) || latestUpdatedNode?._id === node._id;
         const color = getMarkerColor(node);
+        // Classic teardrop pin SVG path. Origin (0,0) sits at the tip
+        // so the marker anchor lines up exactly with the sensor coord.
+        // Scaled to ~32 px on screen; highlighted pins get a thicker
+        // gold stroke + larger scale to pop above the rest.
+        const pinIcon: google.maps.Symbol = {
+          path: "M 0,0 C -2,-20 -10,-22 -10,-30 A 10,10 0 1,1 10,-30 C 10,-22 2,-20 0,0 z",
+          fillColor: color,
+          fillOpacity: 1,
+          strokeColor: isHighlighted ? "#FFB800" : "#1a1a1a",
+          strokeWeight: isHighlighted ? 2.5 : 1.25,
+          scale: isHighlighted ? 1.25 : 1,
+          anchor: new google.maps.Point(0, 0),
+          labelOrigin: new google.maps.Point(0, -22),
+        };
         return (
-          <React.Fragment key={node._id}>
-            {/* Coloured zone-of-influence disk. Click opens the
-                InfoWindow (we dropped the marker pin entirely so
-                operators see exactly what the privacy aggregator
-                allows: a circle, not a pinpoint coord). */}
-            <Circle
-              center={{ lat: node.latitude, lng: node.longitude }}
-              radius={circleRadiusM}
-              options={{
-                strokeColor: isHighlighted ? "#FFB800" : color,
-                strokeWeight: isHighlighted ? 3 : 1.5,
-                strokeOpacity: 0.95,
-                fillColor: color,
-                fillOpacity: 0.35,
-                clickable: true,
-                zIndex: isHighlighted ? 10 : 1,
-              }}
-              onMouseOver={() => setHoveredNodeId(node._id)}
-              onMouseOut={() => setHoveredNodeId(null)}
-              onClick={() =>
-                setClickedNodeId((prev) => (prev === node._id ? null : node._id))
-              }
-            />
-          </React.Fragment>
+          <Marker
+            key={node._id}
+            position={{ lat: node.latitude, lng: node.longitude }}
+            icon={pinIcon}
+            zIndex={isHighlighted ? 10 : 1}
+            onMouseOver={() => setHoveredNodeId(node._id)}
+            onMouseOut={() => setHoveredNodeId(null)}
+            onClick={() =>
+              setClickedNodeId((prev) => (prev === node._id ? null : node._id))
+            }
+          />
         );
       })}
       {activeNode && (
@@ -318,6 +319,11 @@ export default function NodeMap({
           position={{ lat: activeNode.latitude, lng: activeNode.longitude }}
           onCloseClick={() => { setClickedNodeId(null); setHoveredNodeId(null); }}
           options={{
+            // Anchor the InfoWindow above the pin's head (~30 px up from
+            // the tip, which is at the node lat/lng). Was -34 for the
+            // legacy Circle centre; the new pin sits with its tip at the
+            // coord so we shift up by the pin's own height plus a small
+            // gap so the speech-bubble tail clears the marker outline.
             pixelOffset: new google.maps.Size(0, -34),
             disableAutoPan: false,
           }}
