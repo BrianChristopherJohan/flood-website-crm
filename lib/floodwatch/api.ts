@@ -21,11 +21,22 @@ export const FLOODWATCH_API_BASE = (
 ).replace(/\/$/, "");
 
 /**
- * Default dataset selector. Production traffic should always hit
- * `real`; toggle via FLOODWATCH_DATASET=sample for demo / dev mode.
+ * Default dataset selector — defaults to `all` (not `real`).
+ *
+ * The upstream `real` dataset currently contains only three dead test
+ * devices from a previous FYP team (flat batteries, weeks-old data).
+ * The actively-transmitting deployment lives in `sample` (22 simulator
+ * nodes under SIM-PITAS-SOSOP + SIM-PITAS-MANDAMAI per the API docs).
+ *
+ * `all` is the safest default for an FYP demo: surfaces live simulator
+ * activity now AND will automatically pick up any new real hardware
+ * that registers later, with no env-var flip needed.
+ *
+ * Override via FLOODWATCH_DATASET on Vercel/Railway if you want to pin
+ * to a specific dataset.
  */
 export const DEFAULT_DATASET: Dataset =
-  (process.env.FLOODWATCH_DATASET as Dataset) ?? "real";
+  (process.env.FLOODWATCH_DATASET as Dataset) ?? "all";
 
 type Params = Record<string, string | number | boolean | undefined>;
 
