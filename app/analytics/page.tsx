@@ -119,59 +119,103 @@ export default function AnalyticsPage() {
 
     let cancelled = false;
 
+    // Hard timeout — without this, a hung Java cold-start could spin
+    // "Loading analytics..." forever. 15 s is enough to absorb a worst-
+    // case Railway cold boot + JVM warm-up + 8 SQL aggregations + initial
+    // Redis prime, but short enough that a real hang surfaces as an
+    // error the user can act on.
+    const ANALYTICS_TIMEOUT_MS = 15_000;
+
+    function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+      return new Promise<T>((resolve, reject) => {
+        const t = setTimeout(
+          () => reject(new Error(`${label} timed out after ${ms} ms`)),
+          ms,
+        );
+        p.then(
+          (v) => { clearTimeout(t); resolve(v); },
+          (e) => { clearTimeout(t); reject(e); },
+        );
+      });
+    }
+
+    setIsLoading(true);
+
+    // PRIMARY fetch — the analytics payload drives every chart on the
+    // page. The loading spinner clears the moment THIS resolves, even
+    // if the secondary node-GPS fetch is still in flight. (The bubble
+    // map is the only consumer of node GPS coords; everything else
+    // renders fine without them.) Previously the page used
+    // Promise.allSettled([analytics, nodes]) which forced the spinner
+    // to wait for the slower of the two — turning a fast analytics
+    // load into a multi-second wait if /api/nodes was warming up.
     (async () => {
-      setIsLoading(true);
       try {
-        const [analyticsResult, nodesResult] = await Promise.allSettled([
+        const value = await withTimeout(
           authFetchJson<AnalyticsData>("/api/analytics", accessToken, silentRefresh),
-          authFetchJson<NodesApiResponse>("/api/nodes", accessToken, silentRefresh),
-        ]);
+          ANALYTICS_TIMEOUT_MS,
+          "Analytics fetch",
+        );
+        if (!cancelled) setData(value);
+      } catch (err) {
         if (cancelled) return;
-
-        if (analyticsResult.status === "fulfilled") {
-          setData(analyticsResult.value);
-        } else {
-          // Surface a useful message based on the BFF's structured error
-          // code rather than a generic toast. The BFF route emits one of:
-          //   missing_token | unauthorized | forbidden
-          //   service_starting | upstream_error
-          const reason = analyticsResult.reason as
-            | { code?: string; upstreamStatus?: number; message?: string }
-            | undefined;
-          const code = reason?.code;
-          const userMsg =
-            code === "service_starting"
-              ? "Service is starting up. Try again in a few seconds."
-              : code === "forbidden"
-                ? "Your account doesn't have access to analytics."
-                : code === "unauthorized" || code === "missing_token"
-                  ? "Please sign in again to view analytics."
-                  : "Failed to load analytics data.";
-          console.error(
-            "Analytics fetch failed:",
-            code ?? "(no code)",
-            reason?.upstreamStatus ?? "(no upstream status)",
-            reason?.message ?? reason,
-          );
-          toast.error(userMsg);
-        }
-
-        if (nodesResult.status === "fulfilled") {
-          const result = nodesResult.value;
-          if (result?.success && Array.isArray(result.data)) {
-            const map: Record<string, { latitude: number; longitude: number }> = {};
-            result.data.forEach((n) => {
-              if (n.node_id != null && n.latitude != null && n.longitude != null) {
-                map[n.node_id] = { latitude: n.latitude, longitude: n.longitude };
-              }
-            });
-            setNodeGpsMap(map);
-          }
-        } else {
-          console.warn("Node GPS fetch failed; bubble map may be incomplete.");
-        }
+        // Surface a useful message based on the BFF's structured error
+        // code rather than a generic toast. The BFF route emits one of:
+        //   missing_token | unauthorized | forbidden
+        //   service_starting | upstream_error
+        const reason = err as
+          | { code?: string; upstreamStatus?: number; message?: string }
+          | undefined;
+        const code = reason?.code;
+        const isTimeout = /timed out/i.test(reason?.message ?? "");
+        const userMsg = isTimeout
+          ? "Analytics is taking longer than usual. The service may be starting up — try refreshing in a few seconds."
+          : code === "service_starting"
+            ? "Service is starting up. Try again in a few seconds."
+            : code === "forbidden"
+              ? "Your account doesn't have access to analytics."
+              : code === "unauthorized" || code === "missing_token"
+                ? "Please sign in again to view analytics."
+                : "Failed to load analytics data.";
+        console.error(
+          "Analytics fetch failed:",
+          code ?? "(no code)",
+          reason?.upstreamStatus ?? "(no upstream status)",
+          reason?.message ?? reason,
+        );
+        toast.error(userMsg);
       } finally {
         if (!cancelled) setIsLoading(false);
+      }
+    })();
+
+    // SECONDARY fetch — node GPS coords for the bubble map. Decoupled
+    // from the primary loading state: the page renders without these
+    // (the rest of the analytics work fine), and the bubble map updates
+    // lazily when this resolves.
+    (async () => {
+      try {
+        const result = await withTimeout(
+          authFetchJson<NodesApiResponse>("/api/nodes", accessToken, silentRefresh),
+          ANALYTICS_TIMEOUT_MS,
+          "Nodes fetch",
+        );
+        if (cancelled) return;
+        if (result?.success && Array.isArray(result.data)) {
+          const map: Record<string, { latitude: number; longitude: number }> = {};
+          result.data.forEach((n) => {
+            if (n.node_id != null && n.latitude != null && n.longitude != null) {
+              map[n.node_id] = { latitude: n.latitude, longitude: n.longitude };
+            }
+          });
+          setNodeGpsMap(map);
+        }
+      } catch (err) {
+        // Non-fatal — bubble map degrades gracefully.
+        console.warn(
+          "Node GPS fetch failed; bubble map may be incomplete.",
+          err instanceof Error ? err.message : err,
+        );
       }
     })();
 
