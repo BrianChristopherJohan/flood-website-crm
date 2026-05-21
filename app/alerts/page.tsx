@@ -761,22 +761,6 @@ export default function AlertsPage() {
         </div>
       </header>
 
-      {/* BUG-ALERT01: Disclaimer — alerts are synthesised from live node states,
-          not pulled from a persistent alert-history store. */}
-      <div className={`flex items-start gap-3 rounded-2xl border px-4 py-3 ${
-        isDark
-          ? "border-blue/30 bg-blue/10 text-blue-300"
-          : "border-blue-200 bg-blue-50 text-blue-800"
-      }`}>
-        <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
-        <p className="text-xs leading-relaxed">
-          <span className="font-semibold">Live snapshot view — </span>
-          Alerts below reflect the <strong>current state</strong> of each sensor node at the
-          time of the last fetch. They are generated from live telemetry, not retrieved from a
-          historical alert log. Use the date filter to narrow results by node update timestamp.
-        </p>
-      </div>
-
       {/* Stats Cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <div className={`rounded-2xl border p-4 ${isDark ? "border-dark-border bg-dark-card" : "border-light-grey bg-pure-white"}`}>
