@@ -84,6 +84,12 @@ For a localhost-first setup, use the local fallback template instead:
 cp .env.local.example .env.local
 ```
 
+That template sets `CRM_LOCAL_LOGIN=true`, so
+`http://localhost:3000/login?error=expired` renders a CRM-local login form
+instead of redirecting to the community website on port `3002`. If you want
+to test the production SSO-style flow locally, set `CRM_LOCAL_LOGIN=false`
+and run `flood-website-community` on `localhost:3002`.
+
 ### 3. Start the development server
 
 ```bash
@@ -112,6 +118,8 @@ Copy `.env.example` to `.env.local` and set the following:
 | `AI_API_URL` | Server-side URL for `flood-ai-prediction`; used by `/api/ai-predict*` | `http://localhost:8000` |
 | `FLOODWATCH_API_BASE` | Server-side FloodWatch IoT API base URL | `http://159.223.70.28/api/v1` |
 | `FLOODWATCH_DATASET` | Default IoT dataset (`real`, `sample`, or `all`) | `sample` |
+| `CRM_LOCAL_LOGIN` | Local-only CRM login form; leave unset/false on Vercel | `true` |
+| `ALLOW_PAYLOAD_ONLY_AUTH` | Local-only middleware fallback when `JWT_SECRET` is not available | `true` |
 | `NEXT_PUBLIC_GOOGLE_MAPS_KEY` | Google Maps JavaScript API key | `AIzaSy...` |
 
 > **Note:** Never commit `.env.local` to version control.

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import LocalLoginForm from "./LocalLoginForm";
 
 /**
  * CRM has no login form of its own — there is exactly ONE sign-in
@@ -56,11 +57,16 @@ export default async function LoginPage({
   // (QA P0-1 + P1-1: misconfigured / invalid_signature / expired all
   // round-trip through this page on their way back to community.)
   const params = await searchParams;
+  const errorCode = first(params.error);
+  const cb = first(params.callbackUrl);
+
+  if (process.env.CRM_LOCAL_LOGIN === "true") {
+    return <LocalLoginForm errorCode={errorCode} callbackUrl={cb} />;
+  }
+
   const communityUrl =
     process.env.NEXT_PUBLIC_COMMUNITY_URL || "http://localhost:3002";
   const qs = new URLSearchParams();
-  const errorCode = first(params.error);
-  const cb = first(params.callbackUrl);
   if (errorCode) qs.set("error", errorCode);
   if (cb) qs.set("callbackUrl", cb);
   const suffix = qs.toString();

@@ -4,6 +4,9 @@ import type { NextConfig } from "next";
 // Vercel sets VERCEL=1 and manages its own output format — standalone must be off there.
 const nextConfig: NextConfig = {
   output: process.env.VERCEL ? undefined : "standalone",
+  turbopack: {
+    root: process.cwd(),
+  },
 
   // Local preview tooling (Claude Code preview MCP, some IDE proxies) hits
   // the dev server on 127.0.0.1 rather than `localhost`. Next 16's default
