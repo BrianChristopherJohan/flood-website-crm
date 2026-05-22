@@ -41,7 +41,7 @@ The frontend proxies all data through Next.js API routes to `flood-service-crm` 
 ## Architecture
 
 ```
-flood-website-crm  (:3000)
+flood-website-crm  (:3002 local dev)
         │  Next.js API routes (server-side proxy)
         ├──────────────────────► flood-service-crm  (:4002)
         │                           Spring Boot 3 / PostgreSQL / Redis
@@ -85,10 +85,10 @@ cp .env.local.example .env.local
 ```
 
 That template sets `CRM_LOCAL_LOGIN=true`, so
-`http://localhost:3000/login?error=expired` renders a CRM-local login form
-instead of redirecting to the community website on port `3002`. If you want
-to test the production SSO-style flow locally, set `CRM_LOCAL_LOGIN=false`
-and run `flood-website-community` on `localhost:3002`.
+`http://localhost:3002/login?error=expired` renders a CRM-local login form.
+The CRM dev server now uses port `3002` by default; `localhost:3000` is not
+used for this app. If you want to test the production SSO-style flow locally,
+set `CRM_LOCAL_LOGIN=false` and run the community website on a different port.
 
 ### 3. Start the development server
 
@@ -96,7 +96,7 @@ and run `flood-website-community` on `localhost:3002`.
 npm run dev
 ```
 
-The app is available at [http://localhost:3000](http://localhost:3000).
+The app is available at [http://localhost:3002](http://localhost:3002).
 
 ### 4. Production build
 
@@ -218,7 +218,7 @@ The service is included in the project-wide `deploy/docker-compose.yml`. To run 
 docker build -t floodwatch-crm .
 
 # Run with environment variables
-docker run -p 3000:3000 \
+docker run -p 3002:3000 \
   -e JAVA_API_URL=http://host.docker.internal:4002 \
   -e NEXT_PUBLIC_JAVA_API_URL=http://localhost:4002 \
   -e NEXT_PUBLIC_GOOGLE_MAPS_KEY=your_key_here \

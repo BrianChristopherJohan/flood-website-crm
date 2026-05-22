@@ -60,7 +60,11 @@ export default async function LoginPage({
   const errorCode = first(params.error);
   const cb = first(params.callbackUrl);
 
-  if (process.env.CRM_LOCAL_LOGIN === "true") {
+  const useLocalLogin =
+    process.env.CRM_LOCAL_LOGIN === "true" ||
+    (process.env.NODE_ENV !== "production" && process.env.CRM_LOCAL_LOGIN !== "false");
+
+  if (useLocalLogin) {
     return <LocalLoginForm errorCode={errorCode} callbackUrl={cb} />;
   }
 

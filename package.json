@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node --max-http-header-size=65536 node_modules/next/dist/bin/next dev",
+    "dev": "node --max-http-header-size=65536 node_modules/next/dist/bin/next dev --port 3002",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
