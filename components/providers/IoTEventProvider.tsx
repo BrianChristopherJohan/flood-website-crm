@@ -500,7 +500,11 @@ export function IoTEventProvider({ children }: { children: ReactNode }) {
   const [weatherMap, setWeatherMap] = useState<Map<string, WeatherSnapshot>>(new Map());
   const [heartbeatSeq, setHeartbeatSeq] = useState<Map<string, number>>(new Map());
   const [status, setStatus] = useState<IoTStreamContextValue["status"]>("connecting");
-  const [desktopAlertsEnabled, setDesktopAlertsEnabled] = useState(false);
+  const [desktopAlertsEnabled, setDesktopAlertsEnabled] = useState(
+    () => typeof window !== "undefined" &&
+      "Notification" in window &&
+      Notification.permission === "granted",
+  );
   const lastAlertKey = useRef<Map<string, number>>(new Map());
   // Permanently-dismissed alerts (user clicked X / dismiss-all on the
   // dock). They drop out of the toast view but stay in `alerts` so the
@@ -518,11 +522,6 @@ export function IoTEventProvider({ children }: { children: ReactNode }) {
   const recentPopAt = useRef<number[]>([]);
   // Per-key last-popped time for the cooldown.
   const lastPopPerKey = useRef<Map<string, number>>(new Map());
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !("Notification" in window)) return;
-    setDesktopAlertsEnabled(Notification.permission === "granted");
-  }, []);
 
   const enableDesktopAlerts = useCallback(() => {
     if (typeof window === "undefined" || !("Notification" in window)) return;

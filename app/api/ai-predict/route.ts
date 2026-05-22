@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const AI_API_URL = process.env.AI_API_URL ?? "http://localhost:8000";
+const AI_API_URL = (process.env.AI_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;

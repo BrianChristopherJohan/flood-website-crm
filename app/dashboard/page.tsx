@@ -76,6 +76,28 @@ const weekLabels = Array.from({ length: 7 }, (_, i) => {
 
 // ── Flood Risk Analysis helpers — shared with /analytics via lib/floodRiskMock
 type RiskScale = "hourly" | "daily" | "weekly" | "monthly";
+type WeatherScenario = "normal" | "la_nina" | "el_nino";
+
+type AiHourlyPoint = {
+  label: string;
+  level: number;
+  probability?: number;
+};
+
+type AiNodePrediction = {
+  node_id: string;
+  village_id?: string;
+  water_level: number;
+  predicted_level: number;
+  probability: number;
+  risk_label: string;
+};
+
+const WEATHER_SCENARIOS: { key: WeatherScenario; label: string; helper: string }[] = [
+  { key: "normal", label: "Normal", helper: "Baseline monsoon pattern" },
+  { key: "la_nina", label: "La Nina", helper: "Wet-event stress test" },
+  { key: "el_nino", label: "El Nino", helper: "Dry-event baseline" },
+];
 
 export default function DashboardPage() {
   const { isDark } = useTheme();
@@ -267,19 +289,24 @@ export default function DashboardPage() {
   const [riskVariant, setRiskVariant] = useState<FloodRiskVariant>("bar");
   const [minLevel, setMinLevel] = useState(0);
   const [aiSource, setAiSource] = useState(false);
-  const [aiData, setAiData] = useState<{ monthly?: {month:string;level:number}[]; weekly?: Record<string,number[]>; daily?: Record<string,number[]> } | null>(null);
+  const [weatherScenario, setWeatherScenario] = useState<WeatherScenario>("normal");
+  const [aiData, setAiData] = useState<{ hourly?: AiHourlyPoint[]; monthly?: {month:string;level:number}[]; weekly?: Record<string,number[]>; daily?: Record<string,number[]> } | null>(null);
   const [aiOnline, setAiOnline] = useState<boolean | null>(null);
+  const [aiNodePredictions, setAiNodePredictions] = useState<AiNodePrediction[]>([]);
+  const [aiNodesLoading, setAiNodesLoading] = useState(true);
 
   useEffect(() => {
     const year = new Date().getFullYear();
-    const scale = riskScale === "hourly" ? "daily" : riskScale;
+    const scale = riskScale;
+    const today = new Date().toISOString().split("T")[0];
     const ac = new AbortController();
-    fetch(`/api/ai-predict?scale=${scale}&year=${year}`, { signal: ac.signal })
+    fetch(`/api/ai-predict?scale=${scale}&year=${year}&date=${today}`, { signal: ac.signal })
       .then((r) => r.json())
       .then((d: { success?: boolean; data?: unknown; daily_data?: unknown }) => {
         if (d.success) {
           setAiOnline(true);
-          if (scale === "monthly") setAiData((prev) => ({ ...prev, monthly: d.data as { month: string; level: number }[] }));
+          if (scale === "hourly") setAiData((prev) => ({ ...prev, hourly: d.data as AiHourlyPoint[] }));
+          else if (scale === "monthly") setAiData((prev) => ({ ...prev, monthly: d.data as { month: string; level: number }[] }));
           else if (scale === "weekly") setAiData((prev) => ({ ...prev, weekly: d.data as Record<string, number[]> }));
           else if (scale === "daily") setAiData((prev) => ({ ...prev, daily: d.daily_data as Record<string, number[]> }));
         } else {
@@ -289,9 +316,28 @@ export default function DashboardPage() {
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
         setAiOnline(false);
-      });
+    });
     return () => ac.abort();
   }, [riskScale]);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    fetch(`/api/ai-predict/nodes?dataset=sample&scenario=${weatherScenario}`, { signal: ac.signal })
+      .then((r) => r.json())
+      .then((d: { success?: boolean; predictions?: AiNodePrediction[] }) => {
+        if (d.success && Array.isArray(d.predictions)) {
+          setAiNodePredictions(d.predictions);
+          setAiOnline(true);
+        }
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setAiNodesLoading(false);
+      });
+    return () => ac.abort();
+  }, [weatherScenario]);
 
   const hourlyRiskData = useMemo(() => {
     // If we have live nodes, derive max-per-hour from their last_updated stamps;
@@ -358,8 +404,25 @@ export default function DashboardPage() {
     (aiData?.monthly ?? []).map((d: {month:string;level:number}) => ({ name: d.month.slice(0,3), level: d.level }))
   , [aiData]);
 
+  const aiHourlyRiskData = useMemo(() =>
+    (aiData?.hourly ?? []).map((d) => ({ name: d.label, level: d.level, count: d.probability ?? 0 }))
+  , [aiData]);
+
+  const aiPredictionSummary = useMemo(() => {
+    const total = aiNodePredictions.length;
+    const avgProbability = total
+      ? aiNodePredictions.reduce((sum, node) => sum + node.probability, 0) / total
+      : 0;
+    const critical = aiNodePredictions.filter((node) => node.predicted_level === 3).length;
+    const warning = aiNodePredictions.filter((node) => node.predicted_level === 2).length;
+    const topNodes = [...aiNodePredictions]
+      .sort((a, b) => b.probability - a.probability)
+      .slice(0, 3);
+    return { total, avgProbability, critical, warning, topNodes };
+  }, [aiNodePredictions]);
+
   const liveRiskMap = { hourly: hourlyRiskData, daily: dailyRiskData, weekly: weeklyRiskData, monthly: monthlyRiskData };
-  const aiRiskMap = { hourly: hourlyRiskData, daily: aiDailyRiskData, weekly: aiWeeklyRiskData, monthly: aiMonthlyRiskData };
+  const aiRiskMap = { hourly: aiHourlyRiskData.length ? aiHourlyRiskData : hourlyRiskData, daily: aiDailyRiskData, weekly: aiWeeklyRiskData, monthly: aiMonthlyRiskData };
   const rawRiskData = (aiSource && aiOnline ? aiRiskMap : liveRiskMap)[riskScale];
   const filteredRiskData = rawRiskData.map(d => ({
     ...d,
@@ -561,7 +624,7 @@ export default function DashboardPage() {
               : "border-light-grey bg-pure-white"
           }`}
         >
-          <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               {/* Title and subtitle mirror the dedicated /map page so users
                   recognise the same widget on both surfaces. */}
@@ -656,35 +719,50 @@ export default function DashboardPage() {
           }`}
         >
           {/* Header */}
-          <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <h2 className={`text-lg font-semibold transition-colors ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>
                 Flood Risk Analysis
               </h2>
               <p className={`text-xs uppercase tracking-wide transition-colors ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
-                {aiSource && aiOnline ? "XGBoost AI Prediction · flood-ai-prediction" : "Risk level over time · live sensor data"}
+                {aiSource && aiOnline ? "IoT nodes enriched with scenario weather features" : "Risk level over time from live sensor telemetry"}
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {/* AI / Live source toggle */}
-              <button
-                type="button"
-                onClick={() => setAiSource(v => !v)}
-                title={aiOnline === false ? "AI service offline" : "Toggle AI predictions"}
-                className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all ${
-                  aiSource && aiOnline
-                    ? "border-blue-400 bg-blue-400/10 text-blue-400"
-                    : aiOnline === false
-                    ? "cursor-not-allowed border-dark-border opacity-40"
-                    : isDark ? "border-dark-border text-dark-text-muted hover:border-blue-400 hover:text-blue-400" : "border-light-grey text-dark-charcoal/60 hover:border-blue-400 hover:text-blue-400"
-                }`}
-                disabled={aiOnline === false}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5">
-                  <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2v-4M9 21H5a2 2 0 0 1-2-2v-4m0 0h18" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-                AI
-              </button>
+              <div className={`flex rounded-2xl border p-1 text-xs font-semibold ${isDark ? "border-dark-border bg-dark-bg" : "border-light-grey bg-very-light-grey"}`}>
+                <button
+                  type="button"
+                  onClick={() => setAiSource(false)}
+                  aria-pressed={Boolean(!aiSource || !aiOnline)}
+                  className={`rounded-xl px-3 py-1.5 transition-colors ${
+                    !aiSource || !aiOnline
+                      ? "bg-status-green text-pure-white"
+                      : isDark
+                        ? "text-dark-text-muted hover:text-dark-text"
+                        : "text-dark-charcoal/60 hover:text-dark-charcoal"
+                  }`}
+                >
+                  Live
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAiSource(true)}
+                  aria-pressed={Boolean(aiSource && aiOnline)}
+                  disabled={aiOnline === false}
+                  className={`rounded-xl px-3 py-1.5 transition-colors ${
+                    aiSource && aiOnline
+                      ? "bg-primary-blue text-pure-white"
+                      : aiOnline === false
+                        ? "cursor-not-allowed opacity-40"
+                        : isDark
+                          ? "text-dark-text-muted hover:text-dark-text"
+                          : "text-dark-charcoal/60 hover:text-dark-charcoal"
+                  }`}
+                >
+                  AI
+                </button>
+              </div>
               <div className="flex items-center gap-1.5">
                 <span className={`h-1.5 w-1.5 rounded-full ${aiSource && aiOnline ? "bg-blue-400 animate-pulse" : "bg-status-green animate-pulse"}`} />
                 <span className={`text-xs font-semibold ${aiSource && aiOnline ? "text-blue-400" : "text-status-green"}`}>
@@ -694,8 +772,76 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          <div className={`mt-4 grid gap-3 border-y py-3 text-sm sm:grid-cols-4 ${isDark ? "border-dark-border" : "border-light-grey"}`}>
+            <div>
+              <span className={`block text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/55"}`}>
+                Source
+              </span>
+              <strong className={isDark ? "text-dark-text" : "text-dark-charcoal"}>
+                {aiSource && aiOnline ? "AI batch prediction" : "Live telemetry"}
+              </strong>
+            </div>
+            <div>
+              <span className={`block text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/55"}`}>
+                Scenario
+              </span>
+              <strong className={isDark ? "text-dark-text" : "text-dark-charcoal"}>
+                {WEATHER_SCENARIOS.find((s) => s.key === weatherScenario)?.label ?? "Normal"}
+              </strong>
+            </div>
+            <div>
+              <span className={`block text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/55"}`}>
+                Avg AI probability
+              </span>
+              <strong className={aiSource && aiOnline ? "text-primary-blue" : isDark ? "text-dark-text" : "text-dark-charcoal"}>
+                {aiSource && aiOnline ? `${Math.round(aiPredictionSummary.avgProbability)}%` : "Standby"}
+              </strong>
+            </div>
+            <div>
+              <span className={`block text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/55"}`}>
+                Predicted hotspots
+              </span>
+              <strong className={aiPredictionSummary.critical > 0 ? "text-status-danger" : aiPredictionSummary.warning > 0 ? "text-status-warning-2" : "text-status-green"}>
+                {aiSource && aiOnline ? `${aiPredictionSummary.critical} critical, ${aiPredictionSummary.warning} warning` : `${stats.warningNodes + stats.criticalNodes} active`}
+              </strong>
+            </div>
+          </div>
+
+          {aiSource && aiOnline && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+                Weather scenario
+              </span>
+              <div className={`flex flex-1 flex-wrap justify-end gap-1 rounded-2xl p-1 ${isDark ? "bg-dark-bg" : "bg-very-light-grey"}`}>
+                {WEATHER_SCENARIOS.map((scenario) => {
+                  const active = weatherScenario === scenario.key;
+                  return (
+                    <button
+                      key={scenario.key}
+                      type="button"
+                      onClick={() => {
+                        setAiNodesLoading(true);
+                        setWeatherScenario(scenario.key);
+                      }}
+                      className={`min-w-[9rem] rounded-xl px-3 py-2 text-left transition-colors ${
+                        active
+                          ? "bg-primary-blue text-pure-white"
+                          : isDark
+                            ? "text-dark-text-muted hover:bg-dark-border/60 hover:text-dark-text"
+                            : "text-dark-charcoal/65 hover:bg-pure-white hover:text-dark-charcoal"
+                      }`}
+                    >
+                      <span className="block text-xs font-semibold">{scenario.label}</span>
+                      <span className={`block text-[10px] ${active ? "text-pure-white/75" : ""}`}>{scenario.helper}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Controls: scale buttons + level filter */}
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             {/* Scale selector */}
             <div className={`flex overflow-hidden rounded-xl border text-xs font-semibold ${isDark ? "border-dark-border" : "border-light-grey"}`}>
               {(["Hourly", "Daily", "Weekly", "Monthly"] as const).map((s) => {
@@ -769,14 +915,55 @@ export default function DashboardPage() {
 
           {/* Chart — shared FloodRiskChart used by both /dashboard and
               /analytics so the visualisation stays byte-identical. */}
-          <div className="mt-4 h-60 w-full min-w-0">
+          <div className="mt-5 h-64 w-full min-w-0">
             <FloodRiskChart
               data={filteredRiskData}
               scale={riskScale}
               isDark={isDark}
               variant={riskVariant}
+              height={256}
+              showThresholds
             />
           </div>
+
+          {aiSource && aiOnline && (
+            <div className={`mt-3 border-t pt-3 ${isDark ? "border-dark-border" : "border-light-grey"}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+                  Highest predicted node risks
+                </span>
+                <span className={`text-xs ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+                  {aiNodesLoading ? "Updating..." : `${aiPredictionSummary.total} IoT nodes`}
+                </span>
+              </div>
+              <div className="mt-2 grid gap-2 md:grid-cols-3">
+                {aiPredictionSummary.topNodes.map((node) => (
+                  <div key={node.node_id} className="min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className={`truncate text-sm font-semibold ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>
+                        {node.node_id}
+                      </span>
+                      <span className={`text-xs font-semibold ${node.predicted_level >= 3 ? "text-status-danger" : node.predicted_level === 2 ? "text-status-warning-2" : node.predicted_level === 1 ? "text-status-warning-1" : "text-status-green"}`}>
+                        {Math.round(node.probability)}%
+                      </span>
+                    </div>
+                    <div className={`mt-1 h-1.5 overflow-hidden rounded-full ${isDark ? "bg-dark-bg" : "bg-very-light-grey"}`}>
+                      <div
+                        className="h-full rounded-full"
+                        style={{
+                          width: `${Math.min(100, Math.round(node.probability))}%`,
+                          background: RISK_COLORS[node.predicted_level] ?? RISK_COLORS[0],
+                        }}
+                      />
+                    </div>
+                    <p className={`mt-1 truncate text-[11px] ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+                      {node.village_id ?? "Sample village"} | {RISK_LABELS[node.predicted_level] ?? node.risk_label}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Legend */}
           <div className="mt-3 flex flex-wrap items-center justify-center gap-4">

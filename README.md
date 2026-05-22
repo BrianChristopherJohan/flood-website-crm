@@ -78,6 +78,12 @@ cp .env.example .env.local
 
 Edit `.env.local` and fill in the required values (see [Environment Variables](#environment-variables) below).
 
+For a localhost-first setup, use the local fallback template instead:
+
+```bash
+cp .env.local.example .env.local
+```
+
 ### 3. Start the development server
 
 ```bash
@@ -101,10 +107,29 @@ Copy `.env.example` to `.env.local` and set the following:
 |---|---|---|
 | `JAVA_API_URL` | Server-side URL for `flood-service-crm` (used by API routes) | `http://localhost:4002` |
 | `NEXT_PUBLIC_JAVA_API_URL` | Browser-side URL for direct auth calls | `http://localhost:4002` |
+| `COMMUNITY_JAVA_API_URL` | Server-side URL for community-only admin/UAT routes | `http://localhost:4001` |
 | `NEXT_PUBLIC_COMMUNITY_URL` | URL of the public community portal | `http://localhost:3002` |
+| `AI_API_URL` | Server-side URL for `flood-ai-prediction`; used by `/api/ai-predict*` | `http://localhost:8000` |
+| `FLOODWATCH_API_BASE` | Server-side FloodWatch IoT API base URL | `http://159.223.70.28/api/v1` |
+| `FLOODWATCH_DATASET` | Default IoT dataset (`real`, `sample`, or `all`) | `sample` |
 | `NEXT_PUBLIC_GOOGLE_MAPS_KEY` | Google Maps JavaScript API key | `AIzaSy...` |
 
 > **Note:** Never commit `.env.local` to version control.
+
+### Vercel deployment
+
+Set the same variables in Vercel Project Settings -> Environment Variables. Recommended production values:
+
+| Variable | Vercel value |
+|---|---|
+| `JAVA_API_URL` | `https://flood-service-crm-production.up.railway.app` |
+| `COMMUNITY_JAVA_API_URL` | `https://flood-service-community-production.up.railway.app` |
+| `NEXT_PUBLIC_COMMUNITY_URL` | Your deployed community website URL |
+| `AI_API_URL` | `https://flood-ai-prediction-production.up.railway.app` |
+| `FLOODWATCH_API_BASE` | `http://159.223.70.28/api/v1` |
+| `FLOODWATCH_DATASET` | `real` for production, `sample` for demos |
+| `NEXT_PUBLIC_GOOGLE_MAPS_KEY` | A browser key restricted to your Vercel domains |
+| `JWT_SECRET` | Same value as the CRM backend JWT secret, if edge verification is enabled |
 
 ## API Endpoints (Next.js proxy routes)
 

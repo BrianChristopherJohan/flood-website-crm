@@ -347,13 +347,11 @@ export function SensorStreamProvider({
   const subscribers = useRef(new Set<(node: SensorUpdatePayload) => void>());
   const [floodAlerts, setFloodAlerts] = useState<FloodAlertPayload[]>([]);
   const seenIds = useRef(new Set<number>());
-  const [desktopAlertsEnabled, setDesktopAlertsEnabled] = useState(false);
-
-  // Reflect Notification permission state on mount + when it changes.
-  useEffect(() => {
-    if (typeof window === "undefined" || !("Notification" in window)) return;
-    setDesktopAlertsEnabled(Notification.permission === "granted");
-  }, []);
+  const [desktopAlertsEnabled, setDesktopAlertsEnabled] = useState(
+    () => typeof window !== "undefined" &&
+      "Notification" in window &&
+      Notification.permission === "granted",
+  );
 
   const enableDesktopAlerts = useCallback(() => {
     if (typeof window === "undefined" || !("Notification" in window)) return;

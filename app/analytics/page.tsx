@@ -29,6 +29,7 @@ import {
   RISK_FT,
   eventCountToLevel,
   isEmptyChartData,
+  generateHourlyFallback,
   generateDailyFallback,
   generateWeeklyFallback,
   generateMonthlyFallback,
@@ -214,6 +215,8 @@ export default function AnalyticsPage() {
   const [riskVariant, setRiskVariant] = useState<FloodRiskVariant>("bar");
   const [minLevel, setMinLevel] = useState(0);
 
+  const hourlyRiskData = useMemo(() => generateHourlyFallback(), []);
+
   const dailyRiskData = useMemo(() => {
     if (isEmptyChartData(data?.chartData)) return generateDailyFallback();
     return (data?.chartData ?? Array(7).fill(0)).map((count, i) => ({
@@ -243,7 +246,7 @@ export default function AnalyticsPage() {
     }));
   }, [data]);
 
-  const rawRiskData = { hourly: dailyRiskData, daily: dailyRiskData, weekly: weeklyRiskData, monthly: monthlyRiskData }[riskScale];
+  const rawRiskData = { hourly: hourlyRiskData, daily: dailyRiskData, weekly: weeklyRiskData, monthly: monthlyRiskData }[riskScale];
   const filteredRiskData = rawRiskData.map(d => ({
     ...d,
     level: d.level >= minLevel ? d.level : null,
@@ -318,7 +321,7 @@ export default function AnalyticsPage() {
           {/* Controls */}
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
             <div className={`flex overflow-hidden rounded-xl border text-xs font-semibold ${isDark ? "border-dark-border" : "border-light-grey"}`}>
-              {(["Daily", "Weekly", "Monthly"] as const).map((s) => {
+              {(["Hourly", "Daily", "Weekly", "Monthly"] as const).map((s) => {
                 const key = s.toLowerCase() as RiskScale;
                 const active = riskScale === key;
                 return (

@@ -10,6 +10,8 @@ import {
   useJsApiLoader,
 } from "@react-google-maps/api";
 
+import FloodRiskChart, { type RiskScale } from "@/components/charts/FloodRiskChart";
+import { RISK_COLORS, RISK_LABELS, eventCountToLevel } from "@/lib/floodRiskMock";
 import { NodeData, getStatusLabel, getMarkerColor } from "@/lib/types";
 
 /**
@@ -59,6 +61,60 @@ const mapStyles: google.maps.MapTypeStyle[] = [
 const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY || "";
 const hasValidApiKey = apiKey.length > 10 && !apiKey.includes("Example");
 
+type NodePredictionScale = Extract<RiskScale, "weekly" | "monthly">;
+
+const MONTHLY_RAIN_RISK = [18, 16, 9, 5, 3, 2, 2, 3, 5, 9, 14, 17];
+
+function hashText(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function seededRandom(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 0xffffffff;
+  };
+}
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n));
+}
+
+function generateNodePredictionData(node: NodeData, scale: NodePredictionScale) {
+  const now = new Date();
+  const nodeSeed = hashText(`${node.node_id}|${node.latitude.toFixed(4)}|${node.longitude.toFixed(4)}|${scale}`);
+  const rand = seededRandom(nodeSeed + now.getFullYear() * 37 + now.getMonth() * 11);
+  const levelBias = node.current_level * 3.4 + (node.is_dead ? -1.5 : 0);
+  const terrainBias = ((Math.abs(node.latitude) * 13 + Math.abs(node.longitude) * 7) % 4) - 1.5;
+
+  const buckets = scale === "weekly" ? 4 : 5;
+  return Array.from({ length: buckets }, (_, i) => {
+    const d = new Date(now);
+    if (scale === "weekly") d.setDate(d.getDate() + i * 7);
+    else d.setMonth(d.getMonth() + i);
+
+    const monthlyBase = MONTHLY_RAIN_RISK[d.getMonth()] ?? 5;
+    const seasonCount = scale === "weekly" ? monthlyBase / 3.8 : monthlyBase;
+    const noise = (rand() - 0.5) * (scale === "weekly" ? 3 : 6);
+    const recentWaterPulse = Math.max(0, levelBias - i * (scale === "weekly" ? 0.7 : 1.1));
+    const count = clamp(Math.round(seasonCount + recentWaterPulse + terrainBias + noise), 0, 28);
+
+    return {
+      name: scale === "weekly"
+        ? `W${i + 1}`
+        : d.toLocaleDateString("en-MY", { month: "short" }),
+      level: eventCountToLevel(count),
+      count,
+    };
+  });
+}
+
 export default function NodeMap({
   nodes,
   height = 420,
@@ -73,6 +129,7 @@ export default function NodeMap({
   // clickedNodeId  — persistent, survives mouse-leave so user can interact with InfoWindow
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [clickedNodeId, setClickedNodeId] = useState<string | null>(null);
+  const [nodePredictionScale, setNodePredictionScale] = useState<NodePredictionScale>("weekly");
   // Derived: clicked takes priority over hovered
   const activeNodeId = clickedNodeId ?? hoveredNodeId;
   const [mapError, setMapError] = useState(false);
@@ -130,6 +187,14 @@ export default function NodeMap({
   }, []); // intentionally computed only on mount — we do NOT want re-centering on data refresh
 
   const activeNode = nodes.find(n => n._id === activeNodeId);
+  const activePredictionData = useMemo(
+    () => activeNode ? generateNodePredictionData(activeNode, nodePredictionScale) : [],
+    [activeNode, nodePredictionScale],
+  );
+  const activePredictedPeak = activePredictionData.reduce(
+    (peak, point) => Math.max(peak, point.level),
+    0,
+  );
 
   // Callback to store map reference + flip the readiness flag so the
   // first-load auto-fit effect re-runs once the camera is controllable.
@@ -322,7 +387,7 @@ export default function NodeMap({
             disableAutoPan: false,
           }}
         >
-          <div style={{ minWidth: 220, fontFamily: "inherit", padding: "2px 2px 4px" }}>
+          <div style={{ minWidth: 280, maxWidth: 300, fontFamily: "inherit", padding: "2px 2px 4px" }}>
             {/* ── Header ── */}
             <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
               <p style={{ fontWeight: 700, fontSize: 13, color: "#1a1a1a", margin: 0, flex: 1 }}>
@@ -380,6 +445,89 @@ export default function NodeMap({
                     dateStyle: "short", timeStyle: "short",
                   })}
                 </span>
+              </div>
+            </div>
+
+            {/* ── AI prediction mini-chart ── */}
+            <div style={{
+              marginBottom: 10,
+              paddingTop: 8,
+              borderTop: "1px solid #e5e7eb",
+            }}>
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                marginBottom: 6,
+              }}>
+                <div>
+                  <p style={{
+                    margin: 0,
+                    fontSize: 10,
+                    fontWeight: 800,
+                    letterSpacing: "0.05em",
+                    textTransform: "uppercase",
+                    color: "#6b7280",
+                  }}>
+                    AI Flood Prediction
+                  </p>
+                  <p style={{ margin: "1px 0 0", fontSize: 10, color: "#9ca3af" }}>
+                    Peak: <strong style={{ color: RISK_COLORS[activePredictedPeak] ?? "#6b7280" }}>
+                      {RISK_LABELS[activePredictedPeak] ?? "Unknown"}
+                    </strong>
+                  </p>
+                </div>
+                <div style={{
+                  display: "flex",
+                  gap: 2,
+                  padding: 2,
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 10,
+                  background: "#f9fafb",
+                }}>
+                  {(["weekly", "monthly"] as const).map((scale) => {
+                    const active = nodePredictionScale === scale;
+                    return (
+                      <button
+                        key={scale}
+                        type="button"
+                        onClick={() => setNodePredictionScale(scale)}
+                        style={{
+                          border: 0,
+                          borderRadius: 8,
+                          padding: "4px 7px",
+                          background: active ? "#2563eb" : "transparent",
+                          color: active ? "#ffffff" : "#6b7280",
+                          fontSize: 10,
+                          fontWeight: 700,
+                          textTransform: "capitalize",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {scale}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{
+                width: 270,
+                height: 124,
+                maxWidth: "100%",
+                border: "1px solid #edf0f3",
+                borderRadius: 12,
+                padding: "6px 2px 2px",
+                background: "#ffffff",
+              }}>
+                <FloodRiskChart
+                  data={activePredictionData}
+                  scale={nodePredictionScale}
+                  isDark={false}
+                  variant="line"
+                  height={112}
+                  showThresholds
+                />
               </div>
             </div>
 
