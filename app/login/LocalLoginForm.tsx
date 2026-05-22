@@ -22,6 +22,8 @@ type LoginResponse = {
     avatarUrl?: string | null;
   };
   error?: string;
+  hint?: string;
+  detail?: string;
 };
 
 const ERROR_COPY: Record<string, string> = {
@@ -94,7 +96,9 @@ export default function LocalLoginForm({
       });
       const data = (await res.json().catch(() => ({}))) as LoginResponse;
       if (!res.ok) {
-        setError(data.error ?? `Login failed (${res.status})`);
+        setError([data.error ?? `Login failed (${res.status})`, data.hint]
+          .filter(Boolean)
+          .join(" "));
         return;
       }
 

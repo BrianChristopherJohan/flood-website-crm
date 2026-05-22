@@ -64,8 +64,23 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Login failed";
-    const status = (error as { status?: number }).status ?? 500;
-    return NextResponse.json({ error: msg }, { status });
+    const upstreamStatus = (error as { status?: number }).status;
+    const status = upstreamStatus ?? 502;
+    const isLocalBackend =
+      (process.env.JAVA_API_URL ?? process.env.NEXT_PUBLIC_JAVA_API_URL ?? "")
+        .includes("localhost");
+    return NextResponse.json(
+      {
+        error: upstreamStatus
+          ? msg
+          : "CRM backend unavailable. Check JAVA_API_URL and make sure flood-service-crm is running.",
+        detail: msg,
+        hint: isLocalBackend
+          ? "Your CRM frontend is pointing at http://localhost:4002. Start flood-service-crm on port 4002 or set JAVA_API_URL to the deployed backend."
+          : "The configured CRM backend could not be reached. Verify JAVA_API_URL in .env.local or Vercel.",
+      },
+      { status },
+    );
   }
 
   // ── Operator-class gate ────────────────────────────────────────
