@@ -152,13 +152,14 @@ export default function FloodRiskChart({
             if (!active || !payload?.[0]) return null;
             const p = payload[0].payload as FloodRiskDatum;
             const v = Number(p.level ?? 0);
+            const bucket = Math.max(0, Math.min(3, Math.round(v)));
             const probs = riskProbabilities(p.count ?? 0);
             return (
               <ChartTooltipShell isDark={isDark} title={label}>
                 <TooltipRow
                   label={`Level ${v} — ${RISK_LABELS[v] ?? "Unknown"}`}
-                  value={RISK_FT[v] ?? ""}
-                  swatchHex={riskColor(v)}
+                  value={RISK_FT[bucket] ?? ""}
+                  swatchHex={riskColor(bucket)}
                 />
                 <TooltipDivider isDark={isDark} />
                 <div

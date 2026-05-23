@@ -31,11 +31,12 @@ export const RISK_FT     = ["0ft", "1ft", "2ft", "3ft"] as const;
 
 export function riskColor(level: number | null): string {
   if (level === null) return "#e5e7eb";
-  return RISK_COLORS[level] ?? "#e5e7eb";
+  const bucket = Math.max(0, Math.min(3, Math.round(level)));
+  return RISK_COLORS[bucket] ?? "#e5e7eb";
 }
 
 export function riskTickLabel(v: number): string {
-  return RISK_LABELS[v] ?? "";
+  return RISK_LABELS[Math.round(v)] ?? "";
 }
 
 /** Map an event count over a window to a discrete risk level. */

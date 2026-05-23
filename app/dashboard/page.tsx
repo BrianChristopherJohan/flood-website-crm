@@ -93,6 +93,37 @@ type AiNodePrediction = {
   risk_label: string;
 };
 
+function probabilityToChartLevel(probability: number): number {
+  return Number(((Math.max(0, Math.min(100, probability)) / 100) * 3).toFixed(2));
+}
+
+function predictionSeries(
+  predictions: AiNodePrediction[],
+  labels: string[],
+  wave = 0,
+): { name: string; level: number; count: number }[] {
+  if (predictions.length === 0) return [];
+
+  const sorted = [...predictions].sort((a, b) => a.node_id.localeCompare(b.node_id));
+  return labels.map((name, index) => {
+    const start = Math.floor((index * sorted.length) / labels.length);
+    const end = Math.floor(((index + 1) * sorted.length) / labels.length);
+    const bucket = sorted.slice(start, Math.max(start + 1, end));
+    const sample = bucket.length ? bucket : [sorted[index % sorted.length]];
+    const avgProbability =
+      sample.reduce((sum, node) => sum + node.probability, 0) / sample.length;
+    const phase =
+      labels.length > 1 ? Math.sin((index / (labels.length - 1)) * Math.PI * 2) : 0;
+    const probability = Math.max(0, Math.min(100, avgProbability + phase * wave));
+
+    return {
+      name,
+      level: probabilityToChartLevel(probability),
+      count: Number((probability / 5).toFixed(2)),
+    };
+  });
+}
+
 const WEATHER_SCENARIOS: { key: WeatherScenario; label: string; helper: string }[] = [
   { key: "normal", label: "Normal", helper: "Baseline monsoon pattern" },
   { key: "la_nina", label: "La Nina", helper: "Wet-event stress test" },
@@ -413,6 +444,26 @@ export default function DashboardPage() {
     (aiData?.hourly ?? []).map((d) => ({ name: d.label, level: d.level, count: d.probability ?? 0 }))
   , [aiData]);
 
+  const scenarioHourlyRiskData = useMemo(() => {
+    const labels = Array.from({ length: 24 }, (_, i) => `${i.toString().padStart(2, "0")}:00`);
+    return predictionSeries(aiNodePredictions, labels, 5);
+  }, [aiNodePredictions]);
+
+  const scenarioDailyRiskData = useMemo(
+    () => predictionSeries(aiNodePredictions, weekLabels, 4),
+    [aiNodePredictions],
+  );
+
+  const scenarioWeeklyRiskData = useMemo(
+    () => predictionSeries(aiNodePredictions, ["Q1", "Q2", "Q3", "Q4"]),
+    [aiNodePredictions],
+  );
+
+  const scenarioMonthlyRiskData = useMemo(
+    () => predictionSeries(aiNodePredictions, monthLabels),
+    [aiNodePredictions],
+  );
+
   const aiPredictionSummary = useMemo(() => {
     const total = aiNodePredictions.length;
     const avgProbability = total
@@ -427,7 +478,19 @@ export default function DashboardPage() {
   }, [aiNodePredictions]);
 
   const liveRiskMap = { hourly: hourlyRiskData, daily: dailyRiskData, weekly: weeklyRiskData, monthly: monthlyRiskData };
-  const aiRiskMap = { hourly: aiHourlyRiskData.length ? aiHourlyRiskData : hourlyRiskData, daily: aiDailyRiskData, weekly: aiWeeklyRiskData, monthly: aiMonthlyRiskData };
+  const aiRiskMap = aiNodePredictions.length
+    ? {
+        hourly: scenarioHourlyRiskData,
+        daily: scenarioDailyRiskData,
+        weekly: scenarioWeeklyRiskData,
+        monthly: scenarioMonthlyRiskData,
+      }
+    : {
+        hourly: aiHourlyRiskData.length ? aiHourlyRiskData : hourlyRiskData,
+        daily: aiDailyRiskData,
+        weekly: aiWeeklyRiskData,
+        monthly: aiMonthlyRiskData,
+      };
   const rawRiskData = (aiSource && aiOnline ? aiRiskMap : liveRiskMap)[riskScale];
   const aiModeActive = aiSource;
   const aiReady = aiOnline === true;
