@@ -328,10 +328,15 @@ export default function DashboardPage() {
         if (d.success && Array.isArray(d.predictions)) {
           setAiNodePredictions(d.predictions);
           setAiOnline(true);
+        } else {
+          setAiNodePredictions([]);
+          setAiOnline(false);
         }
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
+        setAiNodePredictions([]);
+        setAiOnline(false);
       })
       .finally(() => {
         if (!ac.signal.aborted) setAiNodesLoading(false);
@@ -424,6 +429,9 @@ export default function DashboardPage() {
   const liveRiskMap = { hourly: hourlyRiskData, daily: dailyRiskData, weekly: weeklyRiskData, monthly: monthlyRiskData };
   const aiRiskMap = { hourly: aiHourlyRiskData.length ? aiHourlyRiskData : hourlyRiskData, daily: aiDailyRiskData, weekly: aiWeeklyRiskData, monthly: aiMonthlyRiskData };
   const rawRiskData = (aiSource && aiOnline ? aiRiskMap : liveRiskMap)[riskScale];
+  const aiModeActive = aiSource;
+  const aiReady = aiOnline === true;
+  const aiUnavailable = aiSource && aiOnline === false;
   const filteredRiskData = rawRiskData.map(d => ({
     ...d,
     level: d.level >= minLevel ? d.level : null,
@@ -725,7 +733,7 @@ export default function DashboardPage() {
                 Flood Risk Analysis
               </h2>
               <p className={`text-xs uppercase tracking-wide transition-colors ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
-                {aiSource && aiOnline ? "IoT nodes enriched with scenario weather features" : "Risk level over time from live sensor telemetry"}
+                {aiModeActive ? "IoT nodes enriched with scenario weather features" : "Risk level over time from live sensor telemetry"}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -734,9 +742,9 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => setAiSource(false)}
-                  aria-pressed={Boolean(!aiSource || !aiOnline)}
+                  aria-pressed={!aiModeActive}
                   className={`rounded-xl px-3 py-1.5 transition-colors ${
-                    !aiSource || !aiOnline
+                    !aiModeActive
                       ? "bg-status-green text-pure-white"
                       : isDark
                         ? "text-dark-text-muted hover:text-dark-text"
@@ -748,25 +756,30 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => setAiSource(true)}
-                  aria-pressed={Boolean(aiSource && aiOnline)}
-                  disabled={aiOnline === false}
+                  aria-pressed={aiModeActive}
                   className={`rounded-xl px-3 py-1.5 transition-colors ${
-                    aiSource && aiOnline
+                    aiModeActive
                       ? "bg-primary-blue text-pure-white"
-                      : aiOnline === false
-                        ? "cursor-not-allowed opacity-40"
-                        : isDark
-                          ? "text-dark-text-muted hover:text-dark-text"
-                          : "text-dark-charcoal/60 hover:text-dark-charcoal"
+                      : isDark
+                        ? "text-dark-text-muted hover:text-dark-text"
+                        : "text-dark-charcoal/60 hover:text-dark-charcoal"
                   }`}
                 >
                   AI
                 </button>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className={`h-1.5 w-1.5 rounded-full ${aiSource && aiOnline ? "bg-blue-400 animate-pulse" : "bg-status-green animate-pulse"}`} />
-                <span className={`text-xs font-semibold ${aiSource && aiOnline ? "text-blue-400" : "text-status-green"}`}>
-                  {aiSource && aiOnline ? "AI" : "Live"}
+                <span className={`h-1.5 w-1.5 rounded-full ${
+                  aiModeActive
+                    ? aiReady
+                      ? "bg-blue-400 animate-pulse"
+                      : "bg-status-warning-1"
+                    : "bg-status-green animate-pulse"
+                }`} />
+                <span className={`text-xs font-semibold ${
+                  aiModeActive ? (aiReady ? "text-blue-400" : "text-status-warning-1") : "text-status-green"
+                }`}>
+                  {aiModeActive ? (aiReady ? "AI" : "AI offline") : "Live"}
                 </span>
               </div>
             </div>
@@ -778,7 +791,7 @@ export default function DashboardPage() {
                 Source
               </span>
               <strong className={isDark ? "text-dark-text" : "text-dark-charcoal"}>
-                {aiSource && aiOnline ? "AI batch prediction" : "Live telemetry"}
+                {aiModeActive ? "AI batch prediction" : "Live telemetry"}
               </strong>
             </div>
             <div>
@@ -793,8 +806,8 @@ export default function DashboardPage() {
               <span className={`block text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/55"}`}>
                 Avg AI probability
               </span>
-              <strong className={aiSource && aiOnline ? "text-primary-blue" : isDark ? "text-dark-text" : "text-dark-charcoal"}>
-                {aiSource && aiOnline ? `${Math.round(aiPredictionSummary.avgProbability)}%` : "Standby"}
+              <strong className={aiModeActive && aiReady ? "text-primary-blue" : isDark ? "text-dark-text" : "text-dark-charcoal"}>
+                {aiModeActive ? (aiReady ? `${Math.round(aiPredictionSummary.avgProbability)}%` : "Unavailable") : "Standby"}
               </strong>
             </div>
             <div>
@@ -802,12 +815,12 @@ export default function DashboardPage() {
                 Predicted hotspots
               </span>
               <strong className={aiPredictionSummary.critical > 0 ? "text-status-danger" : aiPredictionSummary.warning > 0 ? "text-status-warning-2" : "text-status-green"}>
-                {aiSource && aiOnline ? `${aiPredictionSummary.critical} critical, ${aiPredictionSummary.warning} warning` : `${stats.warningNodes + stats.criticalNodes} active`}
+                {aiModeActive && aiReady ? `${aiPredictionSummary.critical} critical, ${aiPredictionSummary.warning} warning` : `${stats.warningNodes + stats.criticalNodes} active`}
               </strong>
             </div>
           </div>
 
-          {aiSource && aiOnline && (
+          {aiModeActive && (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
               <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
                 Weather scenario
@@ -837,6 +850,18 @@ export default function DashboardPage() {
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {aiUnavailable && (
+            <div className={`mt-3 rounded-2xl border px-4 py-3 text-xs ${
+              isDark
+                ? "border-status-warning-1/40 bg-status-warning-1/10 text-dark-text-secondary"
+                : "border-status-warning-1/35 bg-status-warning-1/10 text-dark-charcoal/70"
+            }`}>
+              AI mode is selected, but the prediction service is not reachable yet. Start
+              <span className="font-semibold"> flood-ai-prediction </span>
+              on port 8000, then change scenario or refresh this page.
             </div>
           )}
 
@@ -926,7 +951,7 @@ export default function DashboardPage() {
             />
           </div>
 
-          {aiSource && aiOnline && (
+          {aiModeActive && aiReady && (
             <div className={`mt-3 border-t pt-3 ${isDark ? "border-dark-border" : "border-light-grey"}`}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
