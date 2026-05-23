@@ -88,7 +88,7 @@ That template sets `CRM_LOCAL_LOGIN=true`, so
 `http://localhost:3002/login?error=expired` renders a CRM-local login form.
 The CRM dev server now uses port `3002` by default; `localhost:3000` is not
 used for this app. If you want to test the production SSO-style flow locally,
-set `CRM_LOCAL_LOGIN=false` and run the community website on a different port.
+set `CRM_LOCAL_LOGIN=false` and run the community website on `localhost:3003`.
 
 ### 3. Start the development server
 
@@ -114,7 +114,7 @@ Copy `.env.example` to `.env.local` and set the following:
 | `JAVA_API_URL` | Server-side URL for `flood-service-crm` (used by API routes) | `http://localhost:4002` |
 | `NEXT_PUBLIC_JAVA_API_URL` | Browser-side URL for direct auth calls | `http://localhost:4002` |
 | `COMMUNITY_JAVA_API_URL` | Server-side URL for community-only admin/UAT routes | `http://localhost:4001` |
-| `NEXT_PUBLIC_COMMUNITY_URL` | URL of the public community portal | `http://localhost:3002` |
+| `NEXT_PUBLIC_COMMUNITY_URL` | URL of the public community portal | `http://localhost:3003` |
 | `AI_API_URL` | Server-side URL for `flood-ai-prediction`; used by `/api/ai-predict*` | `http://localhost:8000` |
 | `FLOODWATCH_API_BASE` | Server-side FloodWatch IoT API base URL | `http://159.223.70.28/api/v1` |
 | `FLOODWATCH_DATASET` | Default IoT dataset (`real`, `sample`, or `all`) | `sample` |
