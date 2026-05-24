@@ -93,6 +93,41 @@ type AiNodePrediction = {
   risk_label: string;
 };
 
+type AiNodesResponse = {
+  success?: boolean;
+  status?: number;
+  error?: string;
+  detail?: string;
+  predictions?: AiNodePrediction[];
+};
+
+const SIMULATION_PRESETS = [
+  {
+    key: "current",
+    label: "Current",
+    helper: "Now",
+    timestamp: () => new Date().toISOString(),
+  },
+  {
+    key: "jan_monsoon",
+    label: "Jan",
+    helper: "NE monsoon",
+    timestamp: () => `${new Date().getFullYear()}-01-15T12:00:00.000Z`,
+  },
+  {
+    key: "jun_dry",
+    label: "Jun",
+    helper: "Dry season",
+    timestamp: () => `${new Date().getFullYear()}-06-15T12:00:00.000Z`,
+  },
+  {
+    key: "dec_monsoon",
+    label: "Dec",
+    helper: "Monsoon peak",
+    timestamp: () => `${new Date().getFullYear()}-12-15T12:00:00.000Z`,
+  },
+] as const;
+
 function probabilityToChartLevel(probability: number): number {
   return Number(((Math.max(0, Math.min(100, probability)) / 100) * 3).toFixed(2));
 }
@@ -128,6 +163,16 @@ const WEATHER_SCENARIOS: { key: WeatherScenario; label: string; helper: string }
   { key: "normal", label: "Normal", helper: "Baseline monsoon pattern" },
   { key: "la_nina", label: "La Nina", helper: "Wet-event stress test" },
   { key: "el_nino", label: "El Nino", helper: "Dry-event baseline" },
+];
+
+const EVALUATION_ROWS: {
+  scenario: WeatherScenario;
+  expected: string;
+  signal: string;
+}[] = [
+  { scenario: "el_nino", expected: "Lowest", signal: "Dry, hotter, low runoff" },
+  { scenario: "normal", expected: "Middle", signal: "Baseline monsoon" },
+  { scenario: "la_nina", expected: "Highest", signal: "Wet, saturated, stormier" },
 ];
 
 export default function DashboardPage() {
@@ -321,8 +366,12 @@ export default function DashboardPage() {
   const [minLevel, setMinLevel] = useState(0);
   const [aiSource, setAiSource] = useState(false);
   const [weatherScenario, setWeatherScenario] = useState<WeatherScenario>("normal");
+  const [simulationPreset, setSimulationPreset] = useState<(typeof SIMULATION_PRESETS)[number]["key"]>("current");
+  const [simulationTimestamp, setSimulationTimestamp] = useState(() => SIMULATION_PRESETS[0].timestamp());
+  const [aiRetryNonce, setAiRetryNonce] = useState(0);
   const [aiData, setAiData] = useState<{ hourly?: AiHourlyPoint[]; monthly?: {month:string;level:number}[]; weekly?: Record<string,number[]>; daily?: Record<string,number[]> } | null>(null);
   const [aiOnline, setAiOnline] = useState<boolean | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
   const [aiNodePredictions, setAiNodePredictions] = useState<AiNodePrediction[]>([]);
   const [aiNodesLoading, setAiNodesLoading] = useState(true);
 
@@ -335,45 +384,60 @@ export default function DashboardPage() {
       .then((r) => r.json())
       .then((d: { success?: boolean; data?: unknown; daily_data?: unknown }) => {
         if (d.success) {
-          setAiOnline(true);
           if (scale === "hourly") setAiData((prev) => ({ ...prev, hourly: d.data as AiHourlyPoint[] }));
           else if (scale === "monthly") setAiData((prev) => ({ ...prev, monthly: d.data as { month: string; level: number }[] }));
           else if (scale === "weekly") setAiData((prev) => ({ ...prev, weekly: d.data as Record<string, number[]> }));
           else if (scale === "daily") setAiData((prev) => ({ ...prev, daily: d.daily_data as Record<string, number[]> }));
-        } else {
-          setAiOnline(false);
         }
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setAiOnline(false);
     });
     return () => ac.abort();
   }, [riskScale]);
 
   useEffect(() => {
     const ac = new AbortController();
-    fetch(`/api/ai-predict/nodes?dataset=sample&scenario=${weatherScenario}`, { signal: ac.signal })
-      .then((r) => r.json())
-      .then((d: { success?: boolean; predictions?: AiNodePrediction[] }) => {
+    const params = new URLSearchParams({
+      dataset: "sample",
+      scenario: weatherScenario,
+      timestamp: simulationTimestamp,
+    });
+    fetch(`/api/ai-predict/nodes?${params.toString()}`, { signal: ac.signal })
+      .then(async (r) => {
+        const body = (await r.json().catch(() => ({}))) as AiNodesResponse;
+        if (!r.ok) {
+          return {
+            ...body,
+            success: false,
+            status: r.status,
+            error: body.error ?? `AI prediction request failed with HTTP ${r.status}`,
+          };
+        }
+        return body;
+      })
+      .then((d: AiNodesResponse) => {
         if (d.success && Array.isArray(d.predictions)) {
           setAiNodePredictions(d.predictions);
           setAiOnline(true);
+          setAiError(null);
         } else {
           setAiNodePredictions([]);
           setAiOnline(false);
+          setAiError(d.error ?? "AI prediction service returned no node predictions.");
         }
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
         setAiNodePredictions([]);
         setAiOnline(false);
+        setAiError(err instanceof Error ? err.message : "AI prediction service is unreachable.");
       })
       .finally(() => {
         if (!ac.signal.aborted) setAiNodesLoading(false);
       });
     return () => ac.abort();
-  }, [weatherScenario]);
+  }, [weatherScenario, simulationTimestamp, aiRetryNonce]);
 
   const hourlyRiskData = useMemo(() => {
     // If we have live nodes, derive max-per-hour from their last_updated stamps;
@@ -495,6 +559,12 @@ export default function DashboardPage() {
   const aiModeActive = aiSource;
   const aiReady = aiOnline === true;
   const aiUnavailable = aiSource && aiOnline === false;
+  const simulationDateLabel = new Date(simulationTimestamp).toLocaleString("en-MY", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
   const filteredRiskData = rawRiskData.map(d => ({
     ...d,
     level: d.level >= minLevel ? d.level : null,
@@ -864,6 +934,11 @@ export default function DashboardPage() {
               <strong className={isDark ? "text-dark-text" : "text-dark-charcoal"}>
                 {WEATHER_SCENARIOS.find((s) => s.key === weatherScenario)?.label ?? "Normal"}
               </strong>
+              {aiModeActive && (
+                <span className={`mt-0.5 block text-[11px] ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/55"}`}>
+                  {simulationDateLabel}
+                </span>
+              )}
             </div>
             <div>
               <span className={`block text-[11px] font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/55"}`}>
@@ -884,47 +959,137 @@ export default function DashboardPage() {
           </div>
 
           {aiModeActive && (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-              <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
-                Weather scenario
-              </span>
-              <div className={`flex flex-1 flex-wrap justify-end gap-1 rounded-2xl p-1 ${isDark ? "bg-dark-bg" : "bg-very-light-grey"}`}>
-                {WEATHER_SCENARIOS.map((scenario) => {
-                  const active = weatherScenario === scenario.key;
-                  return (
-                    <button
-                      key={scenario.key}
-                      type="button"
-                      onClick={() => {
-                        setAiNodesLoading(true);
-                        setWeatherScenario(scenario.key);
-                      }}
-                      className={`min-w-[9rem] rounded-xl px-3 py-2 text-left transition-colors ${
-                        active
-                          ? "bg-primary-blue text-pure-white"
-                          : isDark
-                            ? "text-dark-text-muted hover:bg-dark-border/60 hover:text-dark-text"
-                            : "text-dark-charcoal/65 hover:bg-pure-white hover:text-dark-charcoal"
-                      }`}
-                    >
-                      <span className="block text-xs font-semibold">{scenario.label}</span>
-                      <span className={`block text-[10px] ${active ? "text-pure-white/75" : ""}`}>{scenario.helper}</span>
-                    </button>
-                  );
-                })}
+            <div className="mt-3 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+                  Weather scenario
+                </span>
+                <div className={`flex flex-1 flex-wrap justify-end gap-1 rounded-2xl p-1 ${isDark ? "bg-dark-bg" : "bg-very-light-grey"}`}>
+                  {WEATHER_SCENARIOS.map((scenario) => {
+                    const active = weatherScenario === scenario.key;
+                    return (
+                      <button
+                        key={scenario.key}
+                        type="button"
+                        onClick={() => {
+                          setAiNodesLoading(true);
+                          setWeatherScenario(scenario.key);
+                        }}
+                        className={`min-w-[9rem] rounded-xl px-3 py-2 text-left transition-colors ${
+                          active
+                            ? "bg-primary-blue text-pure-white"
+                            : isDark
+                              ? "text-dark-text-muted hover:bg-dark-border/60 hover:text-dark-text"
+                              : "text-dark-charcoal/65 hover:bg-pure-white hover:text-dark-charcoal"
+                        }`}
+                      >
+                        <span className="block text-xs font-semibold">{scenario.label}</span>
+                        <span className={`block text-[10px] ${active ? "text-pure-white/75" : ""}`}>{scenario.helper}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+                  Simulation month
+                </span>
+                <div className={`flex flex-1 flex-wrap justify-end gap-1 rounded-2xl p-1 ${isDark ? "bg-dark-bg" : "bg-very-light-grey"}`}>
+                  {SIMULATION_PRESETS.map((preset) => {
+                    const active = simulationPreset === preset.key;
+                    return (
+                      <button
+                        key={preset.key}
+                        type="button"
+                        onClick={() => {
+                          setAiNodesLoading(true);
+                          setSimulationPreset(preset.key);
+                          setSimulationTimestamp(preset.timestamp());
+                        }}
+                        className={`min-w-[7rem] rounded-xl px-3 py-2 text-left transition-colors ${
+                          active
+                            ? "bg-primary-blue text-pure-white"
+                            : isDark
+                              ? "text-dark-text-muted hover:bg-dark-border/60 hover:text-dark-text"
+                              : "text-dark-charcoal/65 hover:bg-pure-white hover:text-dark-charcoal"
+                        }`}
+                      >
+                        <span className="block text-xs font-semibold">{preset.label}</span>
+                        <span className={`block text-[10px] ${active ? "text-pure-white/75" : ""}`}>{preset.helper}</span>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
 
           {aiUnavailable && (
-            <div className={`mt-3 rounded-2xl border px-4 py-3 text-xs ${
+            <div className={`mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 text-xs ${
               isDark
                 ? "border-status-warning-1/40 bg-status-warning-1/10 text-dark-text-secondary"
                 : "border-status-warning-1/35 bg-status-warning-1/10 text-dark-charcoal/70"
             }`}>
-              AI mode is selected, but the prediction service is not reachable yet. Start
-              <span className="font-semibold"> flood-ai-prediction </span>
-              on port 8000, then change scenario or refresh this page.
+              <span>
+                AI mode is selected, but predictions are unavailable. Live telemetry remains active.
+                <span className="mt-1 block font-semibold">
+                  {aiError ?? "Start flood-ai-prediction on port 8000, then retry."}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setAiNodesLoading(true);
+                  setAiRetryNonce((n) => n + 1);
+                }}
+                className="rounded-xl bg-status-warning-1 px-3 py-1.5 text-xs font-semibold text-pure-white transition hover:brightness-95"
+              >
+                Retry AI
+              </button>
+            </div>
+          )}
+
+          {aiModeActive && (
+            <div className={`mt-3 rounded-2xl border p-3 ${isDark ? "border-dark-border bg-dark-bg/60" : "border-light-grey bg-very-light-grey/70"}`}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+                  Scenario evaluation
+                </span>
+                <span className={`text-[11px] ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/55"}`}>
+                  Expected ordering: La Nina &gt; Normal &gt; El Nino
+                </span>
+              </div>
+              <div className="mt-2 grid gap-2 md:grid-cols-3">
+                {EVALUATION_ROWS.map((row) => {
+                  const active = weatherScenario === row.scenario;
+                  const label = WEATHER_SCENARIOS.find((s) => s.key === row.scenario)?.label ?? row.scenario;
+                  return (
+                    <div
+                      key={row.scenario}
+                      className={`rounded-xl border px-3 py-2 text-xs ${
+                        active
+                          ? "border-primary-blue bg-primary-blue/10"
+                          : isDark
+                            ? "border-dark-border bg-dark-card"
+                            : "border-light-grey bg-pure-white"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`font-semibold ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>
+                          {label}
+                        </span>
+                        <span className={active && aiReady ? "font-semibold text-primary-blue" : isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}>
+                          {active && aiReady ? `${Math.round(aiPredictionSummary.avgProbability)}%` : row.expected}
+                        </span>
+                      </div>
+                      <p className={`mt-1 ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/55"}`}>
+                        {row.signal}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
