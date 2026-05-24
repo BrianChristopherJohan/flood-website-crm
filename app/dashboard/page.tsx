@@ -91,6 +91,13 @@ type AiNodePrediction = {
   predicted_level: number;
   probability: number;
   risk_label: string;
+  features?: {
+    rain_1day?: number;
+    rain_7day?: number;
+    ro?: number;
+    swvl1?: number;
+    storm_intensity?: number;
+  };
 };
 
 type AiNodesResponse = {
@@ -540,6 +547,38 @@ export default function DashboardPage() {
       .slice(0, 3);
     return { total, avgProbability, critical, warning, topNodes };
   }, [aiNodePredictions]);
+
+  const scenarioExplanation = useMemo(() => {
+    const total = aiNodePredictions.length || 1;
+    const avg = (selector: (node: AiNodePrediction) => number | undefined) =>
+      aiNodePredictions.reduce((sum, node) => sum + (selector(node) ?? 0), 0) / total;
+
+    const rain1 = avg((node) => node.features?.rain_1day);
+    const rain7 = avg((node) => node.features?.rain_7day);
+    const runoff = avg((node) => node.features?.ro);
+    const soil = avg((node) => node.features?.swvl1);
+    const storm = avg((node) => node.features?.storm_intensity);
+    const water = avg((node) => node.water_level);
+
+    const headline =
+      weatherScenario === "la_nina"
+        ? "Wet-event scenario is increasing rainfall, runoff, and soil saturation."
+        : weatherScenario === "el_nino"
+          ? "Dry-event scenario is lowering rainfall and runoff, but live water levels still affect risk."
+          : "Normal scenario uses baseline monsoon rainfall against the current IoT node levels.";
+
+    return {
+      headline,
+      metrics: [
+        { label: "24h rain", value: `${rain1.toFixed(1)} mm` },
+        { label: "7d rain", value: `${rain7.toFixed(1)} mm` },
+        { label: "Runoff", value: `${runoff.toFixed(1)} mm` },
+        { label: "Soil moisture", value: soil.toFixed(2) },
+        { label: "Storm", value: `${Math.round(storm * 100)}%` },
+        { label: "Water level", value: `${water.toFixed(1)} ft` },
+      ],
+    };
+  }, [aiNodePredictions, weatherScenario]);
 
   const liveRiskMap = { hourly: hourlyRiskData, daily: dailyRiskData, weekly: weeklyRiskData, monthly: monthlyRiskData };
   const aiRiskMap = aiNodePredictions.length
@@ -1181,6 +1220,37 @@ export default function DashboardPage() {
 
           {aiModeActive && aiReady && (
             <div className={`mt-3 border-t pt-3 ${isDark ? "border-dark-border" : "border-light-grey"}`}>
+              <div className={`mb-3 rounded-2xl border p-3 ${isDark ? "border-dark-border bg-dark-bg/60" : "border-light-grey bg-very-light-grey/70"}`}>
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+                      AI scenario explanation
+                    </span>
+                    <p className={`mt-1 text-sm font-medium ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>
+                      {scenarioExplanation.headline}
+                    </p>
+                  </div>
+                  <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${isDark ? "bg-dark-card text-dark-text-secondary" : "bg-pure-white text-dark-charcoal/65"}`}>
+                    {simulationDateLabel}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+                  {scenarioExplanation.metrics.map((metric) => (
+                    <div
+                      key={metric.label}
+                      className={`rounded-xl border px-3 py-2 ${isDark ? "border-dark-border bg-dark-card" : "border-light-grey bg-pure-white"}`}
+                    >
+                      <span className={`block text-[10px] font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/55"}`}>
+                        {metric.label}
+                      </span>
+                      <strong className={`mt-0.5 block text-sm ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>
+                        {metric.value}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
                   Highest predicted node risks
