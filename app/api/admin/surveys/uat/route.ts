@@ -45,21 +45,33 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
-    const url = new URL(req.url);
-    const params = url.searchParams.toString();
-    const target = `${communityBase()}/admin/surveys/uat${params ? `?${params}` : ""}`;
+    // Validate + clamp params instead of forwarding raw searchParams.
+    const sp = new URL(req.url).searchParams;
+    const rawPage = parseInt(sp.get("page") ?? "0", 10);
+    const page = Math.max(0, Number.isNaN(rawPage) ? 0 : rawPage);
+    const rawSize = parseInt(sp.get("size") ?? "20", 10);
+    const size = Math.max(1, Math.min(Number.isNaN(rawSize) ? 20 : rawSize, 100));
+    const role = ["user", "admin", "both"].includes(sp.get("role") ?? "")
+      ? sp.get("role")! : null;
+    const source = ["community", "crm"].includes(sp.get("source") ?? "")
+      ? sp.get("source")! : null;
+    const q = new URLSearchParams({ page: String(page), size: String(size) });
+    if (role) q.set("role", role);
+    if (source) q.set("source", source);
+    const target = `${communityBase()}/admin/surveys/uat?${q.toString()}`;
     const upstream = await fetch(target, {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
     });
     const text = await upstream.text();
     if (!upstream.ok) {
       return NextResponse.json(
-        { error: text || `Upstream ${upstream.status}` },
-        { status: upstream.status === 401 || upstream.status === 403 ? upstream.status : 500 },
+        { error: "Failed to fetch survey responses" },
+        { status: upstream.status === 401 || upstream.status === 403 ? upstream.status : 502 },
       );
     }
     return new NextResponse(text, {
@@ -67,10 +79,10 @@ export async function GET(req: NextRequest) {
       headers: { "Content-Type": "application/json" },
     });
   } catch (error) {
-    console.error("[/api/admin/surveys/uat GET]", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed" },
-      { status: 500 },
+    console.error(
+      "[/api/admin/surveys/uat GET]",
+      error instanceof Error ? error.message : error,
     );
+    return NextResponse.json({ error: "Failed to fetch survey responses" }, { status: 502 });
   }
 }

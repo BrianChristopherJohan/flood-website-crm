@@ -21,6 +21,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import toast from "react-hot-toast";
 import type { NodeData } from "@/lib/types";
 
 export interface SavedPlace {
@@ -116,11 +117,15 @@ function loadSaved(): SavedPlace[] {
   }
 }
 
-function persist(places: SavedPlace[]): void {
+/** Returns true on success, false when storage is unavailable (private
+ *  mode / quota) so callers can warn the operator instead of silently
+ *  losing the place. */
+function persist(places: SavedPlace[]): boolean {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(places));
+    return true;
   } catch {
-    /* quota / private mode — silently ignore */
+    return false;
   }
 }
 
@@ -174,11 +179,12 @@ export default function SavedPlacesPanel({
     const lat = parseFloat(draftLat);
     const lng = parseFloat(draftLng);
     const label = draftLabel.trim();
-    if (!label) return;
-    if (!Number.isFinite(lat) || lat < -90 || lat > 90) return;
-    if (!Number.isFinite(lng) || lng < -180 || lng > 180) return;
+    if (!label) { toast.error("Please enter a label for this place."); return; }
+    if (!Number.isFinite(lat) || lat < -90 || lat > 90) { toast.error("Latitude must be between -90 and 90."); return; }
+    if (!Number.isFinite(lng) || lng < -180 || lng > 180) { toast.error("Longitude must be between -180 and 180."); return; }
     const radius = Number.isFinite(draftRadius) && draftRadius > 0 ? draftRadius : 3;
 
+    const wasEditing = !!editing;
     setPlaces((prev) => {
       const next: SavedPlace[] = editing
         ? prev.map((p) =>
@@ -200,7 +206,14 @@ export default function SavedPlacesPanel({
               createdAt: new Date().toISOString(),
             },
           ];
-      persist(next);
+      // Tell the operator the truth: saved places live in this browser
+      // only, and warn loudly if storage is unavailable rather than
+      // silently losing the entry.
+      if (persist(next)) {
+        toast.success(wasEditing ? "Place updated." : "Place saved to this browser.");
+      } else {
+        toast.error("Could not save — browser storage is unavailable (private mode or full).");
+      }
       return next;
     });
     setEditorOpen(false);
@@ -209,7 +222,8 @@ export default function SavedPlacesPanel({
   const handleDelete = useCallback((id: string) => {
     setPlaces((prev) => {
       const next = prev.filter((p) => p.id !== id);
-      persist(next);
+      if (persist(next)) toast.success("Place removed.");
+      else toast.error("Could not update browser storage.");
       return next;
     });
     setPendingDelete(null);
@@ -330,12 +344,15 @@ export default function SavedPlacesPanel({
         <div
           role="dialog"
           aria-modal="true"
-          aria-label={editing ? "Edit saved place" : "Add saved place"}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          aria-labelledby="saved-place-editor-title"
+          tabIndex={-1}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 outline-none"
           onClick={(e) => { if (e.target === e.currentTarget) setEditorOpen(false); }}
+          onKeyDown={(e) => { if (e.key === "Escape") setEditorOpen(false); }}
+          ref={(el) => { if (el) el.focus(); }}
         >
           <div className={`w-full max-w-md rounded-3xl border p-6 shadow-xl ${cardBg}`}>
-            <h3 className={`text-base font-semibold ${body}`}>
+            <h3 id="saved-place-editor-title" className={`text-base font-semibold ${body}`}>
               {editing ? "Edit saved place" : "Add saved place"}
             </h3>
             <p className={`mt-1 text-xs ${muted}`}>

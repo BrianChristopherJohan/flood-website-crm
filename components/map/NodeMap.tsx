@@ -35,8 +35,6 @@ type NodeMapProps = {
   favouriteIds?: Set<string>;
   /** Called when the user clicks the star button in the InfoWindow */
   onToggleFavourite?: (nodeId: string) => void;
-  /** Per-node circle radius in metres. Defaults to 250 m to match the community site. */
-  circleRadiusM?: number;
 };
 
 const mapStyles: google.maps.MapTypeStyle[] = [
@@ -68,7 +66,6 @@ export default function NodeMap({
   highlightedIds,
   favouriteIds,
   onToggleFavourite,
-  circleRadiusM = 250,
 }: NodeMapProps) {
   // hoveredNodeId  — transient, cleared when mouse leaves
   // clickedNodeId  — persistent, survives mouse-leave so user can interact with InfoWindow
@@ -194,11 +191,19 @@ export default function NodeMap({
             geocodeCache.current.set(key, addr);
             setActiveAddress(addr);
           } else {
+            // Surface quota / no-result failures in the console so an
+            // operator (or we, debugging) can tell "no address" apart
+            // from a silent API failure. ZERO_RESULTS is benign; others
+            // (OVER_QUERY_LIMIT, REQUEST_DENIED) signal a config issue.
+            if (status !== "ZERO_RESULTS") {
+              console.warn(`[NodeMap] reverse-geocode failed: status=${status} for ${key}`);
+            }
             setActiveAddress("—");
           }
         },
       );
-    } catch {
+    } catch (err) {
+      console.warn("[NodeMap] reverse-geocode threw:", err instanceof Error ? err.message : err);
       setActiveAddress("—");
     }
     return () => { cancelled = true; };
@@ -211,6 +216,22 @@ export default function NodeMap({
     mapRef.current = map;
     setMapError(false);
     setMapReady(true);
+  }, []);
+
+  // Pan the map when the Saved Places panel asks to focus a coordinate.
+  // The /map page dispatches a `crm-map-focus-coord` CustomEvent when an
+  // operator clicks a saved-place row; previously nothing listened so
+  // the click did nothing. Here we recentre + zoom in on that point.
+  useEffect(() => {
+    function onFocusCoord(e: Event) {
+      const detail = (e as CustomEvent<{ lat: number; lng: number }>).detail;
+      if (!detail || !mapRef.current) return;
+      if (typeof detail.lat !== "number" || typeof detail.lng !== "number") return;
+      mapRef.current.panTo({ lat: detail.lat, lng: detail.lng });
+      mapRef.current.setZoom(14);
+    }
+    window.addEventListener("crm-map-focus-coord", onFocusCoord as EventListener);
+    return () => window.removeEventListener("crm-map-focus-coord", onFocusCoord as EventListener);
   }, []);
 
   // First-load auto-fit: when nodes load *after* the GoogleMap mounts

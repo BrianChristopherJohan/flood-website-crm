@@ -211,7 +211,14 @@ export default function AnalyticsPage() {
           setNodeGpsMap(map);
         }
       } catch (err) {
-        // Non-fatal — bubble map degrades gracefully.
+        // Non-fatal — the rest of analytics renders fine — but let the
+        // operator know the geographic bubble map may be incomplete so
+        // they don't mistake missing bubbles for "no sensors there".
+        if (!cancelled) {
+          toast("Sensor map data is unavailable — the bubble chart may be incomplete.", {
+            icon: "ℹ️",
+          });
+        }
         console.warn(
           "Node GPS fetch failed; bubble map may be incomplete.",
           err instanceof Error ? err.message : err,

@@ -60,15 +60,14 @@ export async function GET(req: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("[/api/nodes] Error fetching from Java API:", error);
-    const status = (error as { status?: number }).status;
-    const httpStatus = status === 401 || status === 403 ? status : 500;
+    // Log only status + message (never the raw error object, which can
+    // carry the upstream response body). Don't echo internal messages
+    // to the client either.
+    const err = error as { status?: number; message?: string };
+    console.error(`[/api/nodes] upstream status=${err.status ?? "?"} msg=${err.message ?? ""}`);
+    const httpStatus = err.status === 401 || err.status === 403 ? err.status : 502;
     return NextResponse.json(
-      {
-        success: false,
-        error: "Failed to fetch nodes data",
-        message: error instanceof Error ? error.message : "Unknown error",
-      },
+      { success: false, error: "Failed to fetch nodes data" },
       { status: httpStatus }
     );
   }

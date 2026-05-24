@@ -14,11 +14,12 @@ export async function GET(req: NextRequest) {
     const users = await javaFetch<unknown[]>("/admin/users", { token });
     return NextResponse.json(users);
   } catch (error) {
-    const status = error instanceof Error && error.message.includes("403") ? 403 : 500;
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to fetch users" },
-      { status }
-    );
+    // Use the upstream status directly (javaFetch sets `.status`) instead
+    // of fragile string-matching on the error message.
+    const err = error as { status?: number; message?: string };
+    const status = err.status === 401 || err.status === 403 ? err.status : 500;
+    console.error(`[/api/admin/users GET] status=${err.status ?? "?"} msg=${err.message ?? ""}`);
+    return NextResponse.json({ error: "Failed to fetch users" }, { status });
   }
 }
 
@@ -29,8 +30,17 @@ export async function POST(req: NextRequest) {
     const user = await javaFetch<unknown>("/admin/users", { method: "POST", body, token });
     return NextResponse.json(user);
   } catch (error) {
-    const msg = error instanceof Error ? error.message : "Failed to create user";
-    const status = msg.includes("409") || msg.toLowerCase().includes("already exists") ? 409 : 500;
-    return NextResponse.json({ error: msg }, { status });
+    const err = error as { status?: number; message?: string };
+    // 409 = already exists; forward 401/403 too. Surface the upstream
+    // message for 409 only (it's user-actionable, e.g. "email taken").
+    const status =
+      err.status === 409 ? 409
+      : err.status === 401 || err.status === 403 ? err.status
+      : 500;
+    console.error(`[/api/admin/users POST] status=${err.status ?? "?"} msg=${err.message ?? ""}`);
+    return NextResponse.json(
+      { error: status === 409 ? (err.message || "User already exists") : "Failed to create user" },
+      { status },
+    );
   }
 }
