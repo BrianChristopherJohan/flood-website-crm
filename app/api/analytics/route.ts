@@ -13,7 +13,7 @@ function getToken(req: NextRequest): string | undefined {
  * GET /api/analytics — operator analytics dashboard data.
  *
  * Hardening (2026-05-21):
- *   - Fail-open on Redis: if `withCache` throws (e.g. Upstash unreachable
+ *   - Fail-open on Redis: if `withCache` throws (e.g. Redis unreachable
  *     on a cold start, or the cache provider was unset), still serve the
  *     fresh upstream result. Previously a Redis blip turned the whole
  *     analytics page into "Failed to load" — the cache should be an

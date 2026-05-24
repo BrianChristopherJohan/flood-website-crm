@@ -2,7 +2,7 @@
 // GET /api/nodes
 //
 // BFF proxy — fetches sensor nodes from the Java Spring Boot API,
-// caches in Upstash Redis for 30 s, returns the NodeData shape.
+// caches in Redis for 30 s, returns the NodeData shape.
 //
 // LEGACY ROUTE NOTE (2026-05-18):
 //   The /map page no longer consumes this route — it pulls live

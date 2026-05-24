@@ -2,14 +2,14 @@
  * lib/redis.ts — Redis client (server-only, Node runtime)
  *
  * Backed by `ioredis` (TCP) against a Railway Redis plugin. Replaces
- * the earlier `@upstash/redis` REST client.
+ * an earlier REST-based cache client.
  *
  * Why TCP / ioredis: every caller (cache-aside helpers, SSO redeem,
  * `/api/auth/me` cached profile lookup) runs in Vercel Node functions
  * — TCP is fine here. The CRM Edge middleware does NOT touch Redis,
  * so the Edge-incompatibility of TCP is a non-issue.
  *
- * Why we moved off Upstash REST: the project consolidated all
+ * Why we moved to ioredis / TCP: the project consolidated all
  * persistent infra on Railway (Postgres + Redis on the same plugin
  * dashboard), which removes a vendor + the manual env-var copying
  * that drifted twice this session (an extra `A` in the token survived
@@ -18,7 +18,7 @@
  * syntax — the URL substitutes at deploy time and follows credential
  * rotation automatically.
  *
- * Usage (unchanged from the previous Upstash-backed shape):
+ * Usage (unchanged from the previous client's shape):
  *   import { redis, CACHE_TTL, withCache } from '@/lib/redis';
  *
  *   await redis.set('key', JSON.stringify(data), { ex: CACHE_TTL.nodes });
@@ -65,20 +65,20 @@ function getClient(): IORedisClient {
   return _client;
 }
 
-/** Options accepted by `redis.set()` — mirrors the @upstash/redis shape so
+/** Options accepted by `redis.set()` — mirrors the previous client's shape so
  *  existing callers don't need rewriting. */
 type SetOptions = { ex?: number; nx?: boolean };
 
 /**
  * Thin adapter that exposes the same method names + signatures as the
- * old `@upstash/redis` client, so every caller in the codebase keeps
+ * old client, so every caller in the codebase keeps
  * working without changes. Internally maps to ioredis commands.
  */
 export const redis = {
   /**
    * Read a key. Returns `null` if missing. If the stored value is
    * JSON, it's parsed to T; otherwise the raw string is returned
-   * (cast to T). Mirrors the @upstash/redis behaviour where `get<T>`
+   * (cast to T). Mirrors the previous client's behaviour where `get<T>`
    * auto-deserialises.
    */
   async get<T = unknown>(key: string): Promise<T | null> {

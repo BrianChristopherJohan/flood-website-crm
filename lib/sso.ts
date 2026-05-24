@@ -26,7 +26,7 @@ const KEY_PREFIX = "sso:";
 
 /**
  * Atomically read + delete the handoff bundle. Returns `null` if the
- * code is unknown, already redeemed, or expired (Upstash TTL elapsed).
+ * code is unknown, already redeemed, or expired (Redis TTL elapsed).
  *
  * Uses `GETDEL` so the key is gone the instant we read it — replay of
  * the same `?code=` URL gets nothing. This is the only secrecy gate
@@ -36,12 +36,12 @@ const KEY_PREFIX = "sso:";
 export async function redeemSsoCode(code: string): Promise<SsoPayload | null> {
   if (!code || typeof code !== "string") return null;
   // Basic sanity: codes from `mintSsoCode` are 43 chars of base64url.
-  // Reject anything wildly out of band so we don't waste an Upstash
+  // Reject anything wildly out of band so we don't waste a Redis
   // round-trip on obviously bad input.
   if (code.length < 16 || code.length > 128) return null;
   if (!/^[A-Za-z0-9_-]+$/.test(code)) return null;
 
-  // `@upstash/redis` exposes `getdel` matching the Redis 6.2+
+  // The Redis adapter exposes `getdel` matching the Redis 6.2+
   // GETDEL command. Returns the previous value or null.
   let raw: unknown;
   try {
@@ -52,8 +52,8 @@ export async function redeemSsoCode(code: string): Promise<SsoPayload | null> {
   }
   if (raw == null) return null;
 
-  // Upstash JSON-decodes string values back to objects automatically
-  // when the stored payload was JSON. Handle both shapes for safety.
+  // The redis adapter JSON-decodes string values back to objects
+  // automatically when the stored payload was JSON. Handle both shapes for safety.
   if (typeof raw === "string") {
     try {
       return JSON.parse(raw) as SsoPayload;

@@ -17,7 +17,7 @@
 //
 // Steps for both:
 //   1. Validate input shape.
-//   2. `GETDEL sso:<code>` from Upstash — one-shot.
+//   2. `GETDEL sso:<code>` from Redis — one-shot.
 //   3. Verify the access-token JWT signature with JWT_SECRET.
 //   4. Re-validate role server-side.
 //   5. Set httpOnly access + refresh cookies.

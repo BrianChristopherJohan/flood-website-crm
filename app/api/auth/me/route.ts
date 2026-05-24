@@ -16,7 +16,7 @@
 //      have bounced them, but /api/auth/me is also reachable from
 //      same-origin scripts and we want one source of truth.)
 //   4. Fetch displayName / avatarUrl from Java GET /profile. Cache
-//      the response in Upstash for 30 s keyed by user id, so we
+//      the response in Redis for 30 s keyed by user id, so we
 //      don't pay the Railway warm-up tax on every page hydrate.
 //   5. Return { user: { id, email, displayName, avatarUrl, role, roleLabel } }.
 
@@ -34,7 +34,7 @@ import { isOperatorRole, normalizeRoleKey, roleToDisplayLabel } from "@/lib/rbac
 import { redis } from "@/lib/redis";
 
 export const dynamic = "force-dynamic";
-// Node runtime — we call Upstash + Java from here. The middleware
+// Node runtime — we call Redis + Java from here. The middleware
 // runs on Edge; /api/auth/me does not.
 export const runtime = "nodejs";
 
@@ -161,7 +161,7 @@ export async function GET(req: NextRequest) {
   try {
     profile = await redis.get<JavaProfile>(cacheKey);
   } catch {
-    // Upstash transient; fall through and hit Java directly.
+    // Redis transient; fall through and hit Java directly.
   }
 
   if (!profile) {
