@@ -489,6 +489,10 @@ export default function SettingsPage() {
               </div>
               <div>
                 <h3 className={`text-sm font-semibold ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Alert Preferences</h3>
+                <p className={`mt-1 ${subLabelClass}`}>
+                  The Critical / Warning toggles control the on-screen alert pop-up, sound, and
+                  desktop notification. Suppressed alerts still appear in the notification bell.
+                </p>
                 <div className="mt-3 space-y-3">
                   <label className="flex items-center gap-3">
                     <input
@@ -497,7 +501,7 @@ export default function SettingsPage() {
                       onChange={(e) => handleChange("dangerAlertEmail", e.target.checked)}
                       className="h-4 w-4 rounded border-light-grey text-primary-blue focus:ring-primary-blue/40"
                     />
-                    <span className={`text-sm ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Email for Critical-level alerts</span>
+                    <span className={`text-sm ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Pop-ups for Critical-level alerts</span>
                   </label>
                   <label className="flex items-center gap-3">
                     <input
@@ -506,7 +510,7 @@ export default function SettingsPage() {
                       onChange={(e) => handleChange("warningAlertEmail", e.target.checked)}
                       className="h-4 w-4 rounded border-light-grey text-primary-blue focus:ring-primary-blue/40"
                     />
-                    <span className={`text-sm ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Email for Warning-level alerts</span>
+                    <span className={`text-sm ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Pop-ups for Warning-level alerts</span>
                   </label>
                   <label className="flex items-center gap-3">
                     <input
