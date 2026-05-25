@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { javaFetch } from "@/lib/javaApi";
+import { communityJavaFetch } from "@/lib/javaApi";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,10 @@ export async function DELETE(
   const { id } = await params;
   try {
     const token = extractToken(req);
-    await javaFetch<void>(`/community/groups/${id}`, { method: "DELETE", token });
+    // Moderation delete via the community service's admin endpoint
+    // (ADMIN / OPERATIONS_MANAGER gated). The group lives in
+    // flood_community, so route through communityJavaFetch.
+    await communityJavaFetch<void>(`/community/admin/groups/${id}`, { method: "DELETE", token });
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     const status = (error as { status?: number }).status ?? 500;
