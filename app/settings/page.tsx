@@ -50,14 +50,6 @@ function SecurityIcon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-function AppearanceIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />
-    </svg>
-  );
-}
-
 function MapSettingsIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
@@ -82,7 +74,6 @@ type SettingsTab =
   | "data"
   | "integrations"
   | "security"
-  | "appearance"
   | "map"
   | "backup";
 
@@ -178,7 +169,6 @@ const tabs: { id: SettingsTab; label: string; icon: React.ComponentType<React.SV
   { id: "data", label: "Data Management", icon: DataIcon },
   { id: "integrations", label: "Integrations", icon: IntegrationIcon },
   { id: "security", label: "Security", icon: SecurityIcon },
-  { id: "appearance", label: "Appearance", icon: AppearanceIcon },
   { id: "map", label: "Map Settings", icon: MapSettingsIcon },
   { id: "backup", label: "Backup & Restore", icon: BackupIcon },
 ];
@@ -190,7 +180,6 @@ const TAB_LABEL_KEY: Record<SettingsTab, TranslationKey> = {
   data: "settings.tab.data",
   integrations: "settings.tab.integrations",
   security: "settings.tab.security",
-  appearance: "settings.tab.appearance",
   map: "settings.tab.map",
   backup: "settings.tab.backup",
 };
@@ -426,7 +415,6 @@ export default function SettingsPage() {
                 {activeTab === "data" && "Data retention and export settings"}
                 {activeTab === "integrations" && "Third-party service connections"}
                 {activeTab === "security" && "Access control and authentication"}
-                {activeTab === "appearance" && "Theme and display options"}
                 {activeTab === "map" && "Map display and default location"}
                 {activeTab === "backup" && "Backup scheduling and restoration"}
               </p>
@@ -930,83 +918,6 @@ export default function SettingsPage() {
                   <li>• Configure IP whitelist for production environments</li>
                 </ul>
               </div>
-            </div>
-          )}
-
-          {/* Appearance Tab */}
-          {activeTab === "appearance" && (
-            <div className="space-y-5">
-              <div>
-                <label className={labelClass}>Theme</label>
-                <div className="mt-2 flex gap-3">
-                  {["light", "dark", "system"].map((theme) => (
-                    <button
-                      key={theme}
-                      type="button"
-                      onClick={() => handleChange("theme", theme)}
-                      className={`rounded-xl px-5 py-2.5 text-sm font-semibold capitalize transition ${
-                        settings.theme === theme
-                          ? "bg-primary-blue text-pure-white"
-                          : isDark
-                            ? "border border-dark-border text-dark-text hover:border-primary-blue/60"
-                            : "border border-light-grey text-dark-charcoal hover:border-primary-blue/60"
-                      }`}
-                    >
-                      {theme}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className={labelClass}>Primary Color</label>
-                <div className="mt-2 flex items-center gap-3">
-                  <input
-                    type="color"
-                    value={settings.primaryColor}
-                    onChange={(e) => handleChange("primaryColor", e.target.value)}
-                    className={`h-10 w-16 cursor-pointer rounded-lg border ${isDark ? "border-dark-border" : "border-light-grey"}`}
-                  />
-                  <input
-                    type="text"
-                    value={settings.primaryColor}
-                    onChange={(e) => handleChange("primaryColor", e.target.value)}
-                    className={`${inputClass} w-32`}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelClass}>Sidebar Position</label>
-                <div className="mt-2 flex gap-3">
-                  {["left", "right"].map((pos) => (
-                    <button
-                      key={pos}
-                      type="button"
-                      onClick={() => handleChange("sidebarPosition", pos)}
-                      className={`rounded-xl px-5 py-2.5 text-sm font-semibold capitalize transition ${
-                        settings.sidebarPosition === pos
-                          ? "bg-primary-blue text-pure-white"
-                          : isDark
-                            ? "border border-dark-border text-dark-text hover:border-primary-blue/60"
-                            : "border border-light-grey text-dark-charcoal hover:border-primary-blue/60"
-                      }`}
-                    >
-                      {pos}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <label className={`flex items-center justify-between ${cardClass}`}>
-                <div>
-                  <p className={`font-medium ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Compact Mode</p>
-                  <p className={subLabelClass}>Reduce spacing for more content</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={settings.compactMode}
-                  onChange={(e) => handleChange("compactMode", e.target.checked)}
-                  className="h-5 w-5 rounded border-light-grey text-primary-blue focus:ring-primary-blue/40"
-                />
-              </label>
             </div>
           )}
 
