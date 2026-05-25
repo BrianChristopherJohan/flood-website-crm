@@ -34,11 +34,10 @@ import {
   generateWeeklyFallback,
   generateMonthlyFallback,
   generateHourlyFallback,
-  generateMalaysiaStateFallback,
-  isFloodByStateSparse,
 } from "@/lib/floodRiskMock";
 import FloodRiskChart, { type FloodRiskVariant } from "@/components/charts/FloodRiskChart";
 import { ChartTooltipShell, TooltipRow } from "@/components/charts/ChartTooltip";
+import type { IoTStatsSummary } from "@/lib/floodwatch/types";
 
 // ── IoT zone → NodeData adapter (same pattern as map + sensors) ────────────
 function zoneToNodeData(z: Zone): NodeData {
@@ -168,6 +167,10 @@ export default function DashboardPage() {
   const { subscribe: subscribeIoT } = useIoTStream();
   const [nodes, setNodes] = useState<NodeData[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
+  // Real per-area alert roll-up from the FloodWatch IoT API (last 30 days).
+  // Replaces the old hardcoded "national baseline" state chart with genuine
+  // telemetry. Public endpoint — no auth needed.
+  const [iotSummary, setIotSummary] = useState<IoTStatsSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const isFirstFetch = useRef(true);
@@ -220,6 +223,27 @@ export default function DashboardPage() {
           setIsLoading(false);
           isFirstFetch.current = false;
         }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // IoT alert roll-up (last 30 days) — public BFF, runs on mount. Feeds the
+  // real "Alerts by Area" chart (`dataset=all` = live hardware + simulator).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/iot/stats/summary?period=month&dataset=all", {
+          cache: "no-store",
+        });
+        if (cancelled || !res.ok) return;
+        const s = (await res.json()) as IoTStatsSummary;
+        if (!cancelled) setIotSummary(s);
+      } catch (error) {
+        console.warn("[dashboard] IoT summary fetch failed:", error);
       }
     })();
     return () => {
@@ -349,15 +373,16 @@ export default function DashboardPage() {
     name: monthLabels[i],
     waterLevel: v,
   }));
-  // Total Flood by State — fall back to a Malaysia-wide distribution when the
-  // live API reports 0–1 states (otherwise the chart is a single Sarawak bar
-  // with no national context). Live data wins as soon as multiple states
-  // report. Same logic as the Analytics page so the two stay in sync.
-  const stateBarData = (isFloodByStateSparse(analytics?.floodByState)
-    ? generateMalaysiaStateFallback()
-    : (analytics?.floodByState ?? [])
-  ).map((s) => ({ name: s.state, total: s.total }));
-  const stateFallbackActive = isFloodByStateSparse(analytics?.floodByState);
+  // Alerts by Area — REAL per-village alert totals from the IoT API's 30-day
+  // roll-up (top_alerted_villages). Replaces the former hardcoded national
+  // baseline; mirrors the Analytics page so the two stay in sync.
+  const areaData = useMemo(
+    () =>
+      (iotSummary?.top_alerted_villages ?? [])
+        .slice(0, 8)
+        .map((v) => ({ name: v.village_id, total: v.alerts })),
+    [iotSummary],
+  );
   // ── Flood Risk Analysis state ────────────────────────────────────────────
   const [riskScale, setRiskScale] = useState<RiskScale>("daily");
   const [riskVariant, setRiskVariant] = useState<FloodRiskVariant>("bar");
@@ -1393,7 +1418,7 @@ export default function DashboardPage() {
           </div>
         </article>
 
-        {/* Total Flood by State — horizontal, Sarawak highlighted */}
+        {/* Alerts by Area — REAL per-village totals (IoT API, last 30 days) */}
         <article
           className={`rounded-3xl border p-5 shadow-sm transition-colors ${
             isDark
@@ -1406,20 +1431,26 @@ export default function DashboardPage() {
               isDark ? "text-dark-text" : "text-dark-charcoal"
             }`}
           >
-            Total Flood by State
+            Alerts by Area
           </h2>
           <p
             className={`text-xs uppercase tracking-wide transition-colors ${
               isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"
             }`}
           >
-            {stateFallbackActive
-              ? "National historical baseline · Sarawak highlighted"
-              : "Cumulative alert events per state"}
+            Most-alerted villages · last 30 days
           </p>
           <div className="mt-4 h-72 w-full min-w-0">
+            {areaData.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2">
+                <span className="text-3xl">🗺️</span>
+                <p className={`text-sm font-medium ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+                  No area alert activity yet.
+                </p>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={288} minWidth={0}>
-              <BarChart data={stateBarData} layout="vertical" barCategoryGap="16%" margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
+              <BarChart data={areaData} layout="vertical" barCategoryGap="16%" margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} horizontal={false} />
                 <XAxis
                   type="number"
@@ -1428,7 +1459,7 @@ export default function DashboardPage() {
                   tickLine={false}
                   tickFormatter={(v: number) => v.toLocaleString()}
                   label={{
-                    value: "Number of Incidents",
+                    value: "Alerts",
                     position: "insideBottom",
                     offset: -4,
                     fontSize: 11,
@@ -1441,35 +1472,35 @@ export default function DashboardPage() {
                   tick={{ fontSize: 10, fill: chartTextColor }}
                   axisLine={false}
                   tickLine={false}
-                  width={104}
+                  width={126}
                 />
                 <Tooltip
                   cursor={{ fill: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }}
                   content={({ active, payload, label }) => {
                     if (!active || !payload?.[0]) return null;
                     const v = Number(payload[0].value ?? 0);
-                    const isSarawak = String(label) === "Sarawak";
                     return (
                       <ChartTooltipShell isDark={isDark} title={String(label)}>
                         <TooltipRow
-                          label="Total Incidents"
+                          label="Total Alerts"
                           value={v.toLocaleString()}
-                          swatchHex={isSarawak ? "#1d4ed8" : isDark ? "#3b6fd4" : "#93c5fd"}
+                          swatchHex="#1d4ed8"
                         />
                       </ChartTooltipShell>
                     );
                   }}
                 />
-                <Bar dataKey="total" name="Total Incidents" radius={[0, 6, 6, 0]} maxBarSize={26}>
-                  {stateBarData.map((entry) => (
+                <Bar dataKey="total" name="Alerts" radius={[0, 6, 6, 0]} maxBarSize={26}>
+                  {areaData.map((entry, i) => (
                     <Cell
                       key={entry.name}
-                      fill={entry.name === "Sarawak" ? "#1d4ed8" : isDark ? "#3b6fd4" : "#93c5fd"}
+                      fill={i === 0 ? "#1d4ed8" : isDark ? "#3b6fd4" : "#93c5fd"}
                     />
                   ))}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+            )}
           </div>
         </article>
       </div>
