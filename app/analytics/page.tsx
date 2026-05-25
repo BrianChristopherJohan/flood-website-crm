@@ -252,7 +252,8 @@ export default function AnalyticsPage() {
   // distribution when the live API has 0 or 1 states populated, otherwise
   // an admin only ever sees a single Sarawak bar with no national context.
   // Live data wins as soon as multiple states report.
-  const stateBarData = isFloodByStateSparse(data?.floodByState)
+  const stateFallbackActive = isFloodByStateSparse(data?.floodByState);
+  const stateBarData = stateFallbackActive
     ? generateMalaysiaStateFallback().map((s) => ({ name: s.state, total: s.total }))
     : (data?.floodByState ?? []).map((s) => ({ name: s.state, total: s.total }));
 
@@ -648,7 +649,9 @@ export default function AnalyticsPage() {
           Total Flood Incidents by State
         </h2>
         <p className={`text-xs uppercase tracking-wide transition-colors ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
-          Cumulative alert events per state
+          {stateFallbackActive
+            ? "National historical baseline · Sarawak highlighted"
+            : "Cumulative alert events per state · Sarawak highlighted"}
         </p>
         <div className="mt-4 h-[420px] w-full min-w-0">
           <ResponsiveContainer width="100%" height="100%" minWidth={0}>
@@ -673,14 +676,21 @@ export default function AnalyticsPage() {
                       <TooltipRow
                         label="Total Incidents"
                         value={v.toLocaleString()}
-                        swatchHex="#1d4ed8"
+                        swatchHex={String(label) === "Sarawak" ? "#1d4ed8" : isDark ? "#3b6fd4" : "#93c5fd"}
                       />
                     </ChartTooltipShell>
                   );
                 }}
               />
               <Legend verticalAlign="top" height={36} iconType="square" wrapperStyle={{ fontSize: 12, fontWeight: 500, color: chartTextColor }} />
-              <Bar dataKey="total" name="Total Incidents" fill="#1d4ed8" radius={[0, 6, 6, 0]} />
+              <Bar dataKey="total" name="Total Incidents" radius={[0, 6, 6, 0]}>
+                {stateBarData.map((entry) => (
+                  <Cell
+                    key={entry.name}
+                    fill={entry.name === "Sarawak" ? "#1d4ed8" : isDark ? "#3b6fd4" : "#93c5fd"}
+                  />
+                ))}
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
         </div>

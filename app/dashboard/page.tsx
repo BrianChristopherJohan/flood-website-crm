@@ -7,7 +7,8 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Legend,
+  Cell,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -26,14 +27,18 @@ import {
   RISK_COLORS,
   RISK_LABELS,
   RISK_FT,
+  riskColor,
   eventCountToLevel,
   isEmptyChartData,
   generateDailyFallback,
   generateWeeklyFallback,
   generateMonthlyFallback,
   generateHourlyFallback,
+  generateMalaysiaStateFallback,
+  isFloodByStateSparse,
 } from "@/lib/floodRiskMock";
 import FloodRiskChart, { type FloodRiskVariant } from "@/components/charts/FloodRiskChart";
+import { ChartTooltipShell, TooltipRow } from "@/components/charts/ChartTooltip";
 
 // ── IoT zone → NodeData adapter (same pattern as map + sensors) ────────────
 function zoneToNodeData(z: Zone): NodeData {
@@ -244,30 +249,39 @@ export default function DashboardPage() {
     };
   }, [nodes]);
 
-  // Bar chart data from real-time nodes
+  // Bar chart data — the 10 highest-reading nodes, sorted worst-first so the
+  // chart leads with the sensors that need attention (ordered bars are easier
+  // to read than arbitrary insertion order). `level` is the 0–3 ft reading,
+  // used both for height and severity colour.
   const barChartData = useMemo(() => {
-    return nodes.slice(0, 10).map((n) => ({
-      name: n.node_id.slice(-4),
-      level: n.current_level,
-    }));
+    return [...nodes]
+      .sort((a, b) => b.current_level - a.current_level)
+      .slice(0, 10)
+      .map((n) => ({
+        name: n.node_id.slice(-6),
+        level: n.current_level,
+        offline: n.is_dead,
+      }));
   }, [nodes]);
 
   // Chart colors based on theme
   const chartTextColor = isDark ? "#a0a0a0" : "#4E4B4B";
   const chartGridColor = isDark ? "#2d3a5a" : "#E5E5E5";
-  const tooltipBg = isDark ? "#16213e" : "#ffffff";
-  const tooltipBorder = isDark ? "#2d3a5a" : "#BFBFBF";
 
   // Derived chart data from analytics API
   const lineChartData = (analytics?.yearlyChartData ?? Array(5).fill(0)).map((v, i) => ({
     name: monthLabels[i],
     waterLevel: v,
   }));
-  const stateBarData = (analytics?.floodByState ?? []).map((s) => ({
-    name: s.state,
-    total: s.total,
-    critical: 0,
-  }));
+  // Total Flood by State — fall back to a Malaysia-wide distribution when the
+  // live API reports 0–1 states (otherwise the chart is a single Sarawak bar
+  // with no national context). Live data wins as soon as multiple states
+  // report. Same logic as the Analytics page so the two stay in sync.
+  const stateBarData = (isFloodByStateSparse(analytics?.floodByState)
+    ? generateMalaysiaStateFallback()
+    : (analytics?.floodByState ?? [])
+  ).map((s) => ({ name: s.state, total: s.total }));
+  const stateFallbackActive = isFloodByStateSparse(analytics?.floodByState);
   // ── Flood Risk Analysis state ────────────────────────────────────────────
   const [riskScale, setRiskScale] = useState<RiskScale>("daily");
   const [riskVariant, setRiskVariant] = useState<FloodRiskVariant>("bar");
@@ -826,7 +840,7 @@ export default function DashboardPage() {
 
       {/* ─── Bar Charts Row ─────────────────────────────────────────────────── */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {/* Water Level by Node – Vertical Bar */}
+        {/* Water Level by Node — severity-coloured, worst-first */}
         <article
           className={`rounded-3xl border p-5 shadow-sm transition-colors ${
             isDark
@@ -846,12 +860,20 @@ export default function DashboardPage() {
               isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"
             }`}
           >
-            Real-time readings (ft)
+            Top 10 nodes · worst first · colour = severity
           </p>
           <div className="mt-4 h-72 w-full min-w-0">
+            {barChartData.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2">
+                <span className="text-3xl">📡</span>
+                <p className={`text-sm font-medium ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+                  No sensor readings yet.
+                </p>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height={288} minWidth={0}>
-              <BarChart data={barChartData} barCategoryGap="20%">
-                <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+              <BarChart data={barChartData} barCategoryGap="20%" margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} vertical={false} />
                 <XAxis
                   dataKey="name"
                   tick={{ fontSize: 10, fill: chartTextColor }}
@@ -860,16 +882,18 @@ export default function DashboardPage() {
                   label={{
                     value: "Node ID",
                     position: "insideBottom",
-                    offset: -5,
+                    offset: -4,
                     fontSize: 11,
                     fill: chartTextColor,
                   }}
                 />
                 <YAxis
+                  domain={[0, 3.2]}
+                  ticks={[0, 1, 2, 3]}
                   tick={{ fontSize: 10, fill: chartTextColor }}
                   axisLine={false}
                   tickLine={false}
-                  domain={[0, 4]}
+                  width={44}
                   label={{
                     value: "Water Level (ft)",
                     angle: -90,
@@ -878,34 +902,48 @@ export default function DashboardPage() {
                     fill: chartTextColor,
                   }}
                 />
+                {/* Alarm-line context — Alert / Warning / Critical thresholds */}
+                <ReferenceLine y={1} stroke="#f59e0b" strokeDasharray="4 4" strokeOpacity={0.55} />
+                <ReferenceLine y={2} stroke="#f97316" strokeDasharray="4 4" strokeOpacity={0.55} />
+                <ReferenceLine y={3} stroke="#dc2626" strokeDasharray="4 4" strokeOpacity={0.55} />
                 <Tooltip
-                  contentStyle={{
-                    borderRadius: 12,
-                    border: `1px solid ${tooltipBorder}`,
-                    fontSize: 12,
-                    backgroundColor: tooltipBg,
-                    color: isDark ? "#e8e8e8" : "#4E4B4B",
+                  cursor={{ fill: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }}
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.[0]) return null;
+                    const p = payload[0].payload as { level: number; offline: boolean };
+                    return (
+                      <ChartTooltipShell isDark={isDark} title={`Node ${label}`}>
+                        <TooltipRow label="Water Level" value={`${p.level} ft`} swatchHex={riskColor(p.level)} />
+                        <TooltipRow label="Severity" value={RISK_LABELS[p.level] ?? "—"} />
+                        <TooltipRow label="Status" value={p.offline ? "Offline" : "Online"} />
+                      </ChartTooltipShell>
+                    );
                   }}
-                  formatter={(value) => [`${value} ft`, "Water Level"]}
                 />
-                <Legend
-                  verticalAlign="top"
-                  height={36}
-                  iconType="square"
-                  wrapperStyle={{ fontSize: 12, fontWeight: 500, color: chartTextColor }}
-                />
-                <Bar
-                  dataKey="level"
-                  name="Water Level"
-                  fill="#1d4ed8"
-                  radius={[6, 6, 0, 0]}
-                />
+                <Bar dataKey="level" name="Water Level" radius={[6, 6, 0, 0]} maxBarSize={48}>
+                  {barChartData.map((entry) => (
+                    <Cell key={entry.name} fill={riskColor(entry.level)} />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
+            )}
+          </div>
+          {/* Severity legend */}
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-4">
+            {[0, 1, 2, 3].map((lvl) => (
+              <div
+                key={lvl}
+                className={`flex items-center gap-1.5 text-[11px] font-medium ${isDark ? "text-dark-text-secondary" : "text-dark-charcoal/70"}`}
+              >
+                <span className="h-3 w-3 rounded-sm" style={{ background: RISK_COLORS[lvl] }} />
+                {RISK_LABELS[lvl]} ({RISK_FT[lvl]})
+              </div>
+            ))}
           </div>
         </article>
 
-        {/* Total Flood by State – Horizontal Bar */}
+        {/* Total Flood by State — horizontal, Sarawak highlighted */}
         <article
           className={`rounded-3xl border p-5 shadow-sm transition-colors ${
             isDark
@@ -925,21 +963,24 @@ export default function DashboardPage() {
               isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"
             }`}
           >
-            Total vs Critical incidents
+            {stateFallbackActive
+              ? "National historical baseline · Sarawak highlighted"
+              : "Cumulative alert events per state"}
           </p>
           <div className="mt-4 h-72 w-full min-w-0">
             <ResponsiveContainer width="100%" height={288} minWidth={0}>
-              <BarChart data={stateBarData} layout="vertical" barCategoryGap="18%">
-                <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+              <BarChart data={stateBarData} layout="vertical" barCategoryGap="16%" margin={{ top: 8, right: 16, bottom: 4, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} horizontal={false} />
                 <XAxis
                   type="number"
                   tick={{ fontSize: 10, fill: chartTextColor }}
                   axisLine={false}
                   tickLine={false}
+                  tickFormatter={(v: number) => v.toLocaleString()}
                   label={{
                     value: "Number of Incidents",
                     position: "insideBottom",
-                    offset: -5,
+                    offset: -4,
                     fontSize: 11,
                     fill: chartTextColor,
                   }}
@@ -950,35 +991,33 @@ export default function DashboardPage() {
                   tick={{ fontSize: 10, fill: chartTextColor }}
                   axisLine={false}
                   tickLine={false}
-                  width={80}
+                  width={104}
                 />
                 <Tooltip
-                  contentStyle={{
-                    borderRadius: 12,
-                    border: `1px solid ${tooltipBorder}`,
-                    fontSize: 12,
-                    backgroundColor: tooltipBg,
-                    color: isDark ? "#e8e8e8" : "#4E4B4B",
+                  cursor={{ fill: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }}
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.[0]) return null;
+                    const v = Number(payload[0].value ?? 0);
+                    const isSarawak = String(label) === "Sarawak";
+                    return (
+                      <ChartTooltipShell isDark={isDark} title={String(label)}>
+                        <TooltipRow
+                          label="Total Incidents"
+                          value={v.toLocaleString()}
+                          swatchHex={isSarawak ? "#1d4ed8" : isDark ? "#3b6fd4" : "#93c5fd"}
+                        />
+                      </ChartTooltipShell>
+                    );
                   }}
                 />
-                <Legend
-                  verticalAlign="top"
-                  height={36}
-                  iconType="square"
-                  wrapperStyle={{ fontSize: 12, fontWeight: 500, color: chartTextColor }}
-                />
-                <Bar
-                  dataKey="total"
-                  name="Total Incidents"
-                  fill="#1d4ed8"
-                  radius={[0, 6, 6, 0]}
-                />
-                <Bar
-                  dataKey="critical"
-                  name="Critical Incidents"
-                  fill="#1e3a8a"
-                  radius={[0, 6, 6, 0]}
-                />
+                <Bar dataKey="total" name="Total Incidents" radius={[0, 6, 6, 0]} maxBarSize={26}>
+                  {stateBarData.map((entry) => (
+                    <Cell
+                      key={entry.name}
+                      fill={entry.name === "Sarawak" ? "#1d4ed8" : isDark ? "#3b6fd4" : "#93c5fd"}
+                    />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
