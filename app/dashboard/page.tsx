@@ -560,6 +560,23 @@ export default function DashboardPage() {
     };
   }, [aiNodePredictions, weatherScenario]);
 
+  // Full per-node prediction series for the "Predicted Risk by Node" chart —
+  // every in-range IoT node, worst-first, bar height = probability, colour =
+  // predicted severity. (The top-3 list below is the highlight; this is the
+  // complete view.)
+  const aiNodeChartData = useMemo(
+    () => [...aiNodePredictions]
+      .sort((a, b) => b.probability - a.probability)
+      .slice(0, 20)
+      .map((n) => ({
+        name: n.node_id.slice(-6),
+        village: n.village_id,
+        probability: Math.round(n.probability),
+        level: n.predicted_level,
+      })),
+    [aiNodePredictions],
+  );
+
   const liveRiskMap = { hourly: hourlyRiskData, daily: dailyRiskData, weekly: weeklyRiskData, monthly: monthlyRiskData };
   // Prefer scenario (per-node) series; fall back to the time-scale overlay.
   const aiRiskMap = aiNodePredictions.length
@@ -1167,6 +1184,69 @@ export default function DashboardPage() {
                   ))}
                 </div>
               </div>
+
+              {/* Full per-node predicted-risk chart — every in-range IoT node */}
+              <div className="mb-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>Predicted risk by node</span>
+                  <span className={`text-[11px] ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/55"}`}>
+                    {WEATHER_SCENARIOS.find((s) => s.key === weatherScenario)?.label ?? "Normal"} · {simulationDateLabel} · height = probability, colour = predicted severity
+                  </span>
+                </div>
+                <div className="mt-2 h-64 w-full min-w-0">
+                  {aiNodeChartData.length === 0 ? (
+                    <div className="flex h-full items-center justify-center">
+                      <p className={`text-sm font-medium ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>No node predictions for this scenario yet.</p>
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={256} minWidth={0}>
+                      <BarChart data={aiNodeChartData} barCategoryGap="20%" margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} vertical={false} />
+                        <XAxis
+                          dataKey="name"
+                          tick={{ fontSize: 10, fill: chartTextColor }}
+                          axisLine={false}
+                          tickLine={false}
+                          label={{ value: "Node ID", position: "insideBottom", offset: -4, fontSize: 11, fill: chartTextColor }}
+                        />
+                        <YAxis
+                          domain={[0, 100]}
+                          ticks={[0, 30, 50, 75, 100]}
+                          tick={{ fontSize: 10, fill: chartTextColor }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={44}
+                          label={{ value: "Risk probability (%)", angle: -90, position: "insideLeft", fontSize: 11, fill: chartTextColor }}
+                        />
+                        {/* Model probability bands: Alert 30 / Warning 50 / Critical 75 */}
+                        <ReferenceLine y={30} stroke="#f59e0b" strokeDasharray="4 4" strokeOpacity={0.55} />
+                        <ReferenceLine y={50} stroke="#f97316" strokeDasharray="4 4" strokeOpacity={0.55} />
+                        <ReferenceLine y={75} stroke="#dc2626" strokeDasharray="4 4" strokeOpacity={0.55} />
+                        <Tooltip
+                          cursor={{ fill: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }}
+                          content={({ active, payload, label }) => {
+                            if (!active || !payload?.[0]) return null;
+                            const p = payload[0].payload as { probability: number; level: number; village?: string };
+                            return (
+                              <ChartTooltipShell isDark={isDark} title={`Node ${label}`}>
+                                <TooltipRow label="Risk probability" value={`${p.probability}%`} swatchHex={riskColor(p.level)} />
+                                <TooltipRow label="Predicted" value={RISK_LABELS[p.level] ?? "—"} />
+                                {p.village ? <TooltipRow label="Village" value={p.village} /> : null}
+                              </ChartTooltipShell>
+                            );
+                          }}
+                        />
+                        <Bar dataKey="probability" name="Risk probability" radius={[6, 6, 0, 0]} maxBarSize={48}>
+                          {aiNodeChartData.map((entry) => (
+                            <Cell key={entry.name} fill={riskColor(entry.level)} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
+
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className={`text-xs font-semibold uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>Highest predicted node risks</span>
                 <span className={`text-xs ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>{aiNodesLoading ? "Updating..." : `${aiPredictionSummary.total} IoT nodes`}</span>
