@@ -58,14 +58,6 @@ function MapSettingsIcon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-function BackupIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" />
-    </svg>
-  );
-}
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type SettingsTab =
@@ -74,8 +66,7 @@ type SettingsTab =
   | "data"
   | "integrations"
   | "security"
-  | "map"
-  | "backup";
+  | "map";
 
 type CRMSettings = {
   systemName: string;
@@ -170,7 +161,6 @@ const tabs: { id: SettingsTab; label: string; icon: React.ComponentType<React.SV
   { id: "integrations", label: "Integrations", icon: IntegrationIcon },
   { id: "security", label: "Security", icon: SecurityIcon },
   { id: "map", label: "Map Settings", icon: MapSettingsIcon },
-  { id: "backup", label: "Backup & Restore", icon: BackupIcon },
 ];
 
 // Tab id → translation key (label falls back to English via t()).
@@ -181,7 +171,6 @@ const TAB_LABEL_KEY: Record<SettingsTab, TranslationKey> = {
   integrations: "settings.tab.integrations",
   security: "settings.tab.security",
   map: "settings.tab.map",
-  backup: "settings.tab.backup",
 };
 
 export default function SettingsPage() {
@@ -269,11 +258,6 @@ export default function SettingsPage() {
     a.click();
     URL.revokeObjectURL(url);
     toast.success("Settings exported!");
-  };
-
-  const handleBackupNow = () => {
-    // UX-SETTINGS01: server-side backup not yet implemented — use export as workaround
-    toast("Backup not yet available. Use Export to download a local copy.", { icon: "ℹ️" });
   };
 
   const handleTestConnection = async (service: string) => {
@@ -416,7 +400,6 @@ export default function SettingsPage() {
                 {activeTab === "integrations" && "Third-party service connections"}
                 {activeTab === "security" && "Access control and authentication"}
                 {activeTab === "map" && "Map display and default location"}
-                {activeTab === "backup" && "Backup scheduling and restoration"}
               </p>
             </div>
           </div>
@@ -989,100 +972,6 @@ export default function SettingsPage() {
                     Map preview with current settings
                   </div>
                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* Backup Tab */}
-          {activeTab === "backup" && (
-            <div className="space-y-5">
-              <p className="rounded-xl border border-status-warning-1/40 bg-status-warning-1/10 px-4 py-2.5 text-xs font-medium text-status-warning-1">
-                (Saved locally — server enforcement not yet active)
-              </p>
-              <label className={`flex items-center justify-between ${cardClass}`}>
-                <div>
-                  <p className={`font-medium ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Automatic Backups</p>
-                  <p className={subLabelClass}>Schedule regular data backups</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={settings.autoBackup}
-                  onChange={(e) => handleChange("autoBackup", e.target.checked)}
-                  className="h-5 w-5 rounded border-light-grey text-primary-blue focus:ring-primary-blue/40"
-                />
-              </label>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className={labelClass}>Backup Frequency</label>
-                  <select
-                    value={settings.backupFrequency}
-                    onChange={(e) => handleChange("backupFrequency", e.target.value)}
-                    disabled={!settings.autoBackup}
-                    className={`${inputClass} disabled:opacity-50`}
-                  >
-                    <option value="hourly">Hourly</option>
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelClass}>Retention Period</label>
-                  <div className="mt-1 flex items-center gap-3">
-                    <input
-                      type="number"
-                      value={settings.backupRetention}
-                      onChange={(e) => handleChange("backupRetention", parseInt(e.target.value))}
-                      disabled={!settings.autoBackup}
-                      className={`${inputClass} disabled:opacity-50`}
-                    />
-                    <span className={`text-sm ${isDark ? "text-dark-text-secondary" : "text-dark-charcoal/70"}`}>days</span>
-                  </div>
-                </div>
-              </div>
-              <div className={cardClass}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className={`font-semibold ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Last Backup</p>
-                    <p className={subLabelClass}>
-                      {new Date(settings.lastBackup).toLocaleString("en-MY", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      })}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleBackupNow}
-                    className="rounded-xl bg-gray-300 px-4 py-2 text-sm font-semibold text-gray-500 cursor-not-allowed opacity-60"
-                    disabled
-                    title="Server-side backup coming soon"
-                  >
-                    Backup Now · Coming Soon
-                  </button>
-                </div>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <button
-                  type="button"
-                  disabled
-                  title="Coming soon"
-                  className={`rounded-xl border px-4 py-3 text-sm font-semibold opacity-50 cursor-not-allowed ${
-                    isDark
-                      ? "border-dark-border text-dark-text"
-                      : "border-light-grey text-dark-charcoal"
-                  }`}
-                >
-                  Download Backup · Coming Soon
-                </button>
-                <button
-                  type="button"
-                  disabled
-                  title="Coming soon"
-                  className="rounded-xl border border-status-warning-2 px-4 py-3 text-sm font-semibold text-status-warning-2 opacity-50 cursor-not-allowed"
-                >
-                  Restore from Backup · Coming Soon
-                </button>
               </div>
             </div>
           )}
