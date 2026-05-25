@@ -743,6 +743,7 @@ export default function FloodMapPage() {
                 focusNodeId={focusNodeId}
                 favouriteIds={favouriteIds}
                 onToggleFavourite={toggleFavourite}
+                enableMyLocation
               />
             </div>
 

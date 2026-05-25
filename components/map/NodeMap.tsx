@@ -35,6 +35,8 @@ type NodeMapProps = {
   favouriteIds?: Set<string>;
   /** Called when the user clicks the star button in the InfoWindow */
   onToggleFavourite?: (nodeId: string) => void;
+  /** Show the "use my location" control (geolocation → pan + blue dot). */
+  enableMyLocation?: boolean;
 };
 
 const mapStyles: google.maps.MapTypeStyle[] = [
@@ -66,6 +68,7 @@ export default function NodeMap({
   highlightedIds,
   favouriteIds,
   onToggleFavourite,
+  enableMyLocation = false,
 }: NodeMapProps) {
   // clickedNodeId — the node whose InfoWindow is open. The InfoWindow opens
   // ONLY on click (hover no longer opens it, per UX request); clicking the
@@ -89,6 +92,47 @@ export default function NodeMap({
     | null
   >(null);
   const [searchedPlaceClicked, setSearchedPlaceClicked] = useState(false);
+
+  // ── "Use my location" (geolocation) ──────────────────────────────────────
+  // On demand (button click — never auto, which browsers block and which is
+  // jarring), request the browser location, pan + zoom the camera there, and
+  // drop a blue "you are here" dot. Errors (denied / unsupported / timeout)
+  // surface a short message on the control without breaking the map.
+  const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locError, setLocError] = useState<string | null>(null);
+
+  const locateMe = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setLocError("Location isn't supported by this browser.");
+      return;
+    }
+    setLocating(true);
+    setLocError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setMyLocation({ lat, lng });
+        if (mapRef.current) {
+          mapRef.current.panTo({ lat, lng });
+          mapRef.current.setZoom(15);
+        }
+        setLocating(false);
+      },
+      (err) => {
+        setLocating(false);
+        setLocError(
+          err.code === err.PERMISSION_DENIED
+            ? "Location blocked — allow it in your browser, then retry."
+            : err.code === err.TIMEOUT
+              ? "Timed out getting your location. Try again."
+              : "Couldn't get your location. Try again.",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+    );
+  }, []);
 
   const { isLoaded, loadError } = useJsApiLoader({
     id: "google-map-script",
@@ -466,6 +510,43 @@ export default function NodeMap({
         </div>
       </div>
 
+      {/* ── "Use my location" control (top-right overlay) ─────────────────── */}
+      {enableMyLocation && (
+        <div style={{ position: "absolute", top: 12, right: 12, zIndex: 10, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+          <button
+            type="button"
+            onClick={locateMe}
+            disabled={locating}
+            aria-label="Show my location"
+            title={myLocation ? "Re-centre on my location" : "Show my location"}
+            style={{
+              width: 40, height: 40, borderRadius: 999, background: "#fff",
+              boxShadow: "0 4px 12px -2px rgba(0,0,0,0.18)", border: "none",
+              cursor: locating ? "default" : "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: locError ? "#dc2626" : myLocation ? "#1a73e8" : "#475569",
+            }}
+          >
+            {locating ? (
+              <span
+                className="animate-spin"
+                style={{ width: 18, height: 18, borderRadius: 999, border: "2px solid #cbd5e1", borderTopColor: "#1a73e8", display: "inline-block" }}
+              />
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ width: 20, height: 20 }}>
+                <circle cx="12" cy="12" r="3.5" />
+                <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+              </svg>
+            )}
+          </button>
+          {locError && (
+            <div style={{ maxWidth: 220, background: "#fff", color: "#dc2626", fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 10, boxShadow: "0 4px 12px -2px rgba(0,0,0,0.18)" }}>
+              {locError}
+            </div>
+          )}
+        </div>
+      )}
+
       <GoogleMap
         mapContainerStyle={{ width: "100%", height, borderRadius: "16px" }}
         center={mapCenter}
@@ -507,6 +588,21 @@ export default function NodeMap({
           />
         );
       })}
+      {myLocation && (
+        <Marker
+          position={myLocation}
+          icon={{
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 7,
+            fillColor: "#1a73e8",
+            fillOpacity: 1,
+            strokeColor: "#ffffff",
+            strokeWeight: 3,
+          }}
+          zIndex={9999}
+          title="Your location"
+        />
+      )}
       {activeNode && (
         <InfoWindow
           position={{ lat: activeNode.latitude, lng: activeNode.longitude }}
