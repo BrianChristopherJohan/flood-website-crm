@@ -467,7 +467,12 @@ export default function BlogPage() {
         headers,
         body: JSON.stringify(payload),
       });
-      await parseJsonResponse(res);
+      const updated = await parseJsonResponse<BlogDto>(res);
+      // Reflect the server's returned entity in place — the response IS
+      // the source of truth, so no full refetch is needed.
+      setBlogs((prev) =>
+        prev.map((b) => (b.id === editTarget.id ? { ...b, ...updated } : b)),
+      );
       showToast("Article updated successfully");
     } else {
       const res = await authFetch("/api/blogs", accessToken, silentRefresh, {
@@ -475,10 +480,20 @@ export default function BlogPage() {
         headers,
         body: JSON.stringify(payload),
       });
-      await parseJsonResponse(res);
+      const created = await parseJsonResponse<BlogDto>(res);
+      if (!created || !created.id) {
+        throw new Error("The server did not return the created article. Please refresh.");
+      }
+      // Show the new article immediately from the POST response and clear
+      // any active filter/search so it can't be hidden. We deliberately
+      // do NOT refetch-and-replace here: a read-after-write lag could
+      // briefly return a stale list and wipe the row the user just
+      // created. Stats/visibility derive from `blogs`, so this is enough.
+      setBlogs((prev) => [created, ...prev.filter((b) => b.id !== created.id)]);
+      setFilterCat("All");
+      setSearch("");
       showToast("Article published successfully");
     }
-    await loadBlogs(filterCat);
   };
 
   const handleDelete = async (blog: BlogDto) => {
