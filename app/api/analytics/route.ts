@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { javaFetch } from "@/lib/javaApi";
 import { withCache, CACHE_TTL } from "@/lib/redis";
+import { bffToken } from "@/lib/bffAuth";
 
 export const revalidate = 0;
 export const dynamic = "force-dynamic";
-
-function getToken(req: NextRequest): string | undefined {
-  return req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? undefined;
-}
 
 /**
  * GET /api/analytics — operator analytics dashboard data.
@@ -25,7 +22,12 @@ function getToken(req: NextRequest): string | undefined {
  *     to silent-refresh or surface the failure.
  */
 export async function GET(req: NextRequest) {
-  const token = getToken(req);
+  // Source the JWT from the httpOnly cookie first, falling back to the
+  // Authorization header. On the cookie-based session (SSO handoff /
+  // fresh login) the client AuthContext never holds an in-memory access
+  // token, so the header is empty after a page load — reading the cookie
+  // is what keeps analytics loading instead of spinning forever.
+  const token = bffToken(req);
   if (!token) {
     return NextResponse.json(
       { error: "Not authenticated", code: "missing_token" },

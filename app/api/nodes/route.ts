@@ -21,14 +21,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { javaFetch, type JavaSensorDto } from "@/lib/javaApi";
 import { withCache, CACHE_TTL } from "@/lib/redis";
+import { bffToken } from "@/lib/bffAuth";
 import type { NodeData } from "@/lib/types";
 
 export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") ?? undefined;
-    const token = authHeader?.replace(/^Bearer\s+/i, "");
+    // Cookie-first token resolution (see lib/bffAuth). Keeps /analytics,
+    // /sensors etc. working after a reload when the client has no
+    // in-memory access token to put in the Authorization header.
+    const token = bffToken(req);
 
     const nodes = await withCache<NodeData[]>(
       "crm:nodes:all",

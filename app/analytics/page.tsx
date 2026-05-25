@@ -21,7 +21,6 @@ import {
 
 import OverviewCard from "@/components/cards/OverviewCard";
 import { useAuth } from "@/lib/AuthContext";
-import { authFetchJson } from "@/lib/authFetch";
 import { useTheme } from "@/lib/ThemeContext";
 import {
   RISK_COLORS,
@@ -100,9 +99,46 @@ type NodesApiResponse = {
   data?: Array<{ node_id: string; latitude: number; longitude: number }>;
 };
 
+// Fetch a BFF route using the httpOnly auth cookie (credentials:include).
+// On 401/403 the access cookie may have expired — call silentRefresh()
+// once (which POSTs /api/auth/refresh and rotates the cookie) then retry.
+// Throws an Error tagged with the BFF's structured `code` on failure so
+// the page can show specific guidance.
+async function fetchJsonWithCookie<T>(
+  url: string,
+  silentRefresh: () => Promise<string | null>,
+): Promise<T> {
+  const doFetch = () => fetch(url, { cache: "no-store", credentials: "include" });
+
+  let res = await doFetch();
+  if (res.status === 401 || res.status === 403) {
+    await silentRefresh();
+    res = await doFetch();
+  }
+
+  if (!res.ok) {
+    let code: string | undefined;
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = (await res.json()) as { code?: string; error?: string; message?: string };
+      code = body?.code;
+      if (typeof body?.error === "string") message = body.error;
+      else if (typeof body?.message === "string") message = body.message;
+    } catch {
+      /* keep generic message */
+    }
+    const err = new Error(message) as Error & { code?: string; upstreamStatus?: number };
+    err.code = code;
+    err.upstreamStatus = res.status;
+    throw err;
+  }
+
+  return res.json() as Promise<T>;
+}
+
 export default function AnalyticsPage() {
   const { isDark } = useTheme();
-  const { accessToken, silentRefresh } = useAuth();
+  const { silentRefresh } = useAuth();
 
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -115,8 +151,13 @@ export default function AnalyticsPage() {
   const chartGridColor  = isDark ? "#2d3a5a" : "#E5E5E5";
 
   useEffect(() => {
-    if (!accessToken) return;
-
+    // NOTE: this fetch is intentionally NOT gated behind an in-memory
+    // accessToken. On the cookie-based CRM session (SSO handoff / fresh
+    // login) AuthContext never holds an access token in memory, so a
+    // `if (!accessToken) return;` guard here left isLoading=true forever
+    // — the "Loading analytics…" spinner that never resolved. Auth now
+    // rides on the httpOnly cookie via credentials:include, and the BFF
+    // routes read that cookie (lib/bffAuth).
     let cancelled = false;
 
     // Hard timeout — without this, a hung Java cold-start could spin
@@ -152,7 +193,7 @@ export default function AnalyticsPage() {
     (async () => {
       try {
         const value = await withTimeout(
-          authFetchJson<AnalyticsData>("/api/analytics", accessToken, silentRefresh),
+          fetchJsonWithCookie<AnalyticsData>("/api/analytics", silentRefresh),
           ANALYTICS_TIMEOUT_MS,
           "Analytics fetch",
         );
@@ -196,7 +237,7 @@ export default function AnalyticsPage() {
     (async () => {
       try {
         const result = await withTimeout(
-          authFetchJson<NodesApiResponse>("/api/nodes", accessToken, silentRefresh),
+          fetchJsonWithCookie<NodesApiResponse>("/api/nodes", silentRefresh),
           ANALYTICS_TIMEOUT_MS,
           "Nodes fetch",
         );
@@ -229,7 +270,7 @@ export default function AnalyticsPage() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken, silentRefresh]);
+  }, [silentRefresh]);
 
   // ── Derived chart data ───────────────────────────────────────────────────
   const lineChartData = (data?.chartData ?? Array(7).fill(0)).map((v, i) => ({
