@@ -2,7 +2,6 @@
 
 import { useTheme } from "@/lib/ThemeContext";
 import { useAuth } from "@/lib/AuthContext";
-import { authFetch } from "@/lib/authFetch";
 import OverviewCard from "@/components/cards/OverviewCard";
 import BlogImageUploader from "@/components/BlogImageUploader";
 import { useCallback, useEffect, useState } from "react";
@@ -105,6 +104,27 @@ async function parseJsonResponse<T>(res: Response): Promise<T> {
   }
   if (res.status === 204) return undefined as unknown as T;
   return res.json() as Promise<T>;
+}
+
+// Call a same-origin BFF route with the httpOnly auth cookie, retrying
+// once via silentRefresh() on 401/403 (it rotates the cookie). Decoupled
+// from the in-memory accessToken, which is null on the cookie-based CRM
+// session (SSO handoff / fresh login) — that null previously gated the
+// blog list AND every mutation shut, so the page showed "No articles
+// found" and clicking Publish silently did nothing.
+async function cookieFetch(
+  url: string,
+  silentRefresh: () => Promise<string | null>,
+  options: RequestInit = {},
+): Promise<Response> {
+  const doFetch = () =>
+    fetch(url, { ...options, cache: "no-store", credentials: "include" });
+  let res = await doFetch();
+  if (res.status === 401 || res.status === 403) {
+    await silentRefresh();
+    res = await doFetch();
+  }
+  return res;
 }
 
 // ─── Blog Form Modal ──────────────────────────────────────────────────────────
@@ -380,7 +400,7 @@ function BlogCard({
 
 export default function BlogPage() {
   const { isDark } = useTheme();
-  const { accessToken, silentRefresh } = useAuth();
+  const { silentRefresh } = useAuth();
   const [blogs, setBlogs] = useState<BlogDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -401,14 +421,10 @@ export default function BlogPage() {
   }, []);
 
   const loadBlogs = useCallback(async (category = "All") => {
-    if (!accessToken) {
-      setLoading(false);
-      return;
-    }
     setLoading(true); setError("");
     try {
       const catParam = category !== "All" ? `&category=${encodeURIComponent(category)}` : "";
-      const res = await authFetch(`/api/blogs?size=100${catParam}`, accessToken, silentRefresh);
+      const res = await cookieFetch(`/api/blogs?size=100${catParam}`, silentRefresh);
       const data = await parseJsonResponse<PageDto>(res);
       setBlogs(data.content ?? []);
     } catch (e) {
@@ -416,7 +432,7 @@ export default function BlogPage() {
     } finally {
       setLoading(false);
     }
-  }, [accessToken, silentRefresh]);
+  }, [silentRefresh]);
 
   useEffect(() => { void loadBlogs(); }, [loadBlogs]);
 
@@ -451,7 +467,6 @@ export default function BlogPage() {
   });
 
   const handleSave = async (form: BlogForm) => {
-    if (!accessToken) return;
     const payload = {
       title: form.title,
       body: form.body,
@@ -462,7 +477,7 @@ export default function BlogPage() {
     };
     const headers = { "Content-Type": "application/json" };
     if (editTarget) {
-      const res = await authFetch(`/api/blogs/${editTarget.id}`, accessToken, silentRefresh, {
+      const res = await cookieFetch(`/api/blogs/${editTarget.id}`, silentRefresh, {
         method: "PUT",
         headers,
         body: JSON.stringify(payload),
@@ -475,7 +490,7 @@ export default function BlogPage() {
       );
       showToast("Article updated successfully");
     } else {
-      const res = await authFetch("/api/blogs", accessToken, silentRefresh, {
+      const res = await cookieFetch("/api/blogs", silentRefresh, {
         method: "POST",
         headers,
         body: JSON.stringify(payload),
@@ -499,9 +514,8 @@ export default function BlogPage() {
   const handleDelete = async (blog: BlogDto) => {
     if (deleteTarget?.id !== blog.id) { setDeleteTarget(blog); return; }
     setDeleteTarget(null);
-    if (!accessToken) return;
     try {
-      const res = await authFetch(`/api/blogs/${blog.id}`, accessToken, silentRefresh, { method: "DELETE" });
+      const res = await cookieFetch(`/api/blogs/${blog.id}`, silentRefresh, { method: "DELETE" });
       await parseJsonResponse(res);
       setBlogs(prev => prev.filter(b => b.id !== blog.id));
       showToast("Article deleted");
@@ -511,9 +525,8 @@ export default function BlogPage() {
   };
 
   const handleToggleFeatured = async (blog: BlogDto) => {
-    if (!accessToken) return;
     try {
-      const res = await authFetch(`/api/blogs/${blog.id}/featured`, accessToken, silentRefresh, { method: "PATCH" });
+      const res = await cookieFetch(`/api/blogs/${blog.id}/featured`, silentRefresh, { method: "PATCH" });
       const updated = await parseJsonResponse<BlogDto>(res);
       setBlogs(prev => prev.map(b => b.id === blog.id ? updated : b));
       showToast(updated.isFeatured ? "Marked as featured" : "Removed from featured");
