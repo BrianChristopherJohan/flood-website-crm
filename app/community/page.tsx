@@ -82,11 +82,16 @@ function CommunityManagementInner() {
 
   // ── Fetch posts ──────────────────────────────────────────────────────────────
 
+  // The post + group feeds are PUBLIC reads (the community backend serves
+  // them anonymously), so they are intentionally decoupled from accessToken.
+  // Gating them behind the session token caused the spinner to hang forever
+  // whenever accessToken was briefly null / not-yet-hydrated, since the
+  // loading flag is only cleared once the fetch runs. A plain same-origin
+  // fetch still carries the CRM session cookie for the BFF route's own gate.
   const fetchPosts = useCallback(async (page: number, sort: string, replace: boolean) => {
-    if (!accessToken) return;
     if (replace) setPostsLoading(true);
     try {
-      const res = await authFetch(`/api/community/posts?page=${page}&size=20&sort=${sort}`, accessToken, silentRefresh);
+      const res = await fetch(`/api/community/posts?page=${page}&size=20&sort=${sort}`, { cache: "no-store" });
       if (!res.ok) {
         setFetchError("Failed to load posts. Please try again.");
         return;
@@ -99,15 +104,14 @@ function CommunityManagementInner() {
     } catch {
       setFetchError("Failed to load posts. Please try again.");
     } finally { setPostsLoading(false); }
-  }, [accessToken, silentRefresh]);
+  }, []);
 
   // ── Fetch groups ─────────────────────────────────────────────────────────────
 
   const fetchGroups = useCallback(async () => {
-    if (!accessToken) return;
     setGroupsLoading(true);
     try {
-      const res = await authFetch("/api/community/groups", accessToken, silentRefresh);
+      const res = await fetch("/api/community/groups", { cache: "no-store" });
       if (!res.ok) {
         setFetchError("Failed to load groups. Please try again.");
         return;
@@ -117,13 +121,12 @@ function CommunityManagementInner() {
     } catch {
       setFetchError("Failed to load groups. Please try again.");
     } finally { setGroupsLoading(false); }
-  }, [accessToken, silentRefresh]);
+  }, []);
 
   useEffect(() => {
-    if (!accessToken) return;
     if (isFirstFetch.current) { fetchGroups(); isFirstFetch.current = false; }
     fetchPosts(0, postSort, true);
-  }, [accessToken, postSort, fetchPosts, fetchGroups]);
+  }, [postSort, fetchPosts, fetchGroups]);
 
   // ── Actions ───────────────────────────────────────────────────────────────────
 
