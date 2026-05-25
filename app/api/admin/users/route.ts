@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { javaFetch } from "@/lib/javaApi";
+import { communityJavaFetch } from "@/lib/javaApi";
 
+// The canonical user store is flood-service-community (flood_community DB):
+// customers register there, the admin is seeded there, and the CRM logs in
+// via the community SSO handoff. The CRM's own flood_crm DB holds no users,
+// so User Management must read/write users through communityJavaFetch — using
+// the CRM's own backend returns an empty list ("No users found"). The
+// community /admin/users is ROLE_ADMIN-gated; the forwarded CRM admin JWT
+// satisfies it (same as the other community admin routes).
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -11,10 +18,10 @@ function extractToken(req: NextRequest): string | undefined {
 export async function GET(req: NextRequest) {
   try {
     const token = extractToken(req);
-    const users = await javaFetch<unknown[]>("/admin/users", { token });
+    const users = await communityJavaFetch<unknown[]>("/admin/users", { token });
     return NextResponse.json(users);
   } catch (error) {
-    // Use the upstream status directly (javaFetch sets `.status`) instead
+    // Use the upstream status directly (communityJavaFetch sets `.status`) instead
     // of fragile string-matching on the error message.
     const err = error as { status?: number; message?: string };
     const status = err.status === 401 || err.status === 403 ? err.status : 500;
@@ -27,7 +34,7 @@ export async function POST(req: NextRequest) {
   try {
     const token = extractToken(req);
     const body = await req.json();
-    const user = await javaFetch<unknown>("/admin/users", { method: "POST", body, token });
+    const user = await communityJavaFetch<unknown>("/admin/users", { method: "POST", body, token });
     return NextResponse.json(user);
   } catch (error) {
     const err = error as { status?: number; message?: string };

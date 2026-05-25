@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { javaFetch } from "@/lib/javaApi";
+import { communityJavaFetch } from "@/lib/javaApi";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,7 @@ export async function PATCH(
   try {
     const token = extractToken(req);
     const body = await req.json();
-    const user = await javaFetch<unknown>(`/admin/users/${id}`, {
+    const user = await communityJavaFetch<unknown>(`/admin/users/${id}`, {
       method: "PATCH",
       body,
       token,
@@ -36,7 +36,7 @@ export async function DELETE(
   const { id } = await params;
   try {
     const token = extractToken(req);
-    await javaFetch<void>(`/admin/users/${id}`, { method: "DELETE", token });
+    await communityJavaFetch<void>(`/admin/users/${id}`, { method: "DELETE", token });
     return new NextResponse(null, { status: 204 });
   } catch (error) {
     return NextResponse.json(
