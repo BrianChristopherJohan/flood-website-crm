@@ -3,8 +3,10 @@
 import { useTheme } from "@/lib/ThemeContext";
 import { useAuth } from "@/lib/AuthContext";
 import { authFetch } from "@/lib/authFetch";
+import OverviewCard from "@/components/cards/OverviewCard";
 import BlogImageUploader from "@/components/BlogImageUploader";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import toast from "react-hot-toast";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,13 +77,13 @@ function readingTime(body: string): string {
 
 function categoryColor(cat: string): { bg: string; text: string } {
   switch (cat) {
-    case "General":     return { bg: "bg-gray-100 dark:bg-[var(--color-dark-card-alt)]",       text: "text-gray-700 dark:text-[var(--color-dark-text-secondary)]" };
+    case "General":     return { bg: "bg-gray-100 dark:bg-dark-bg",        text: "text-gray-700 dark:text-dark-text-secondary" };
     case "Flood Alert": return { bg: "bg-blue-100 dark:bg-blue-900/30",    text: "text-blue-700 dark:text-blue-400" };
-    case "Safety Tips": return { bg: "bg-amber-100 dark:bg-amber-900/30", text: "text-amber-700 dark:text-amber-400" };
+    case "Safety Tips": return { bg: "bg-amber-100 dark:bg-amber-900/30",  text: "text-amber-700 dark:text-amber-400" };
     case "Community":   return { bg: "bg-purple-100 dark:bg-purple-900/30", text: "text-purple-700 dark:text-purple-400" };
-    case "Updates":     return { bg: "bg-blue-100 dark:bg-blue-900/30",   text: "text-blue-700 dark:text-blue-400" };
+    case "Updates":     return { bg: "bg-blue-100 dark:bg-blue-900/30",    text: "text-blue-700 dark:text-blue-400" };
     case "Research":    return { bg: "bg-emerald-100 dark:bg-emerald-900/30", text: "text-emerald-700 dark:text-emerald-400" };
-    default:            return { bg: "bg-gray-100 dark:bg-[var(--color-dark-card-alt)]",      text: "text-gray-700 dark:text-[var(--color-dark-text-secondary)]" };
+    default:            return { bg: "bg-gray-100 dark:bg-dark-bg",        text: "text-gray-700 dark:text-dark-text-secondary" };
   }
 }
 
@@ -118,6 +120,7 @@ function BlogFormModal({
   onClose: () => void;
   onSave: (form: BlogForm) => Promise<void>;
 }) {
+  const { isDark } = useTheme();
   const [form, setForm] = useState<BlogForm>(initial);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -146,17 +149,23 @@ function BlogFormModal({
 
   if (!show) return null;
 
+  const text = isDark ? "text-dark-text" : "text-dark-charcoal";
+  const muted = isDark ? "text-dark-text-muted" : "text-dark-charcoal/50";
+  const inputCls = `w-full rounded-xl border px-4 py-2.5 text-sm outline-none transition focus:border-primary-blue/60 focus:ring-2 focus:ring-primary-blue/10 ${
+    isDark ? "bg-dark-bg border-dark-border text-dark-text placeholder:text-dark-text-muted" : "bg-pure-white border-light-grey text-dark-charcoal placeholder:text-dark-charcoal/40"
+  }`;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl shadow-2xl bg-[var(--color-card)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className={`w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl border shadow-2xl ${isDark ? "bg-dark-card border-dark-border" : "bg-pure-white border-light-grey"}`}>
 
         {/* Modal header */}
-        <div className="flex items-center justify-between p-6 border-b border-[var(--color-border)]">
-          <h2 className="text-xl font-bold text-[var(--color-text)]">
+        <div className={`flex items-center justify-between p-6 border-b ${isDark ? "border-dark-border" : "border-light-grey"}`}>
+          <h2 className={`text-xl font-bold ${text}`}>
             {initial.title ? "Edit Article" : "New Article"}
           </h2>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-[var(--color-hover)] transition">
-            <svg className="w-5 h-5 text-[var(--color-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <button onClick={onClose} className={`rounded-full p-2 transition ${isDark ? "hover:bg-dark-bg" : "hover:bg-very-light-grey"}`}>
+            <svg className={`h-5 w-5 ${muted}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
@@ -165,14 +174,14 @@ function BlogFormModal({
         {/* Modal body */}
         <div className="p-6 space-y-5">
           {error && (
-            <div className="bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-700 rounded-lg p-3 text-sm text-red-700 dark:text-red-300">
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300">
               {error}
             </div>
           )}
 
           {/* Title */}
           <div>
-            <label className="block text-sm font-semibold mb-1.5 text-[var(--color-text)]">
+            <label className={`mb-1.5 block text-sm font-semibold ${text}`}>
               Title <span className="text-red-500">*</span>
             </label>
             <input
@@ -180,22 +189,24 @@ function BlogFormModal({
               value={form.title}
               onChange={e => set("title", e.target.value)}
               placeholder="Enter article title..."
-              className="w-full rounded-lg border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-[var(--color-input-bg)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-muted)]"
+              className={inputCls}
             />
           </div>
 
           {/* Category */}
           <div>
-            <label className="block text-sm font-semibold mb-1.5 text-[var(--color-text)]">Category</label>
+            <label className={`mb-1.5 block text-sm font-semibold ${text}`}>Category</label>
             <div className="flex flex-wrap gap-2">
               {CATEGORIES.map(cat => (
                 <button
                   key={cat}
                   onClick={() => set("category", cat)}
-                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition ${
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
                     form.category === cat
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "border-[var(--color-border)] text-[var(--color-muted)] hover:border-[var(--color-dark-text-secondary)]"
+                      ? "border-primary-blue bg-primary-blue text-pure-white"
+                      : isDark
+                        ? "border-dark-border text-dark-text-muted hover:border-primary-blue/60"
+                        : "border-light-grey text-dark-charcoal/60 hover:border-primary-blue/60"
                   }`}
                 >
                   {cat}
@@ -206,8 +217,8 @@ function BlogFormModal({
 
           {/* Hero image — file upload replaces the legacy URL paste field */}
           <div>
-            <label className="block text-sm font-semibold mb-1.5 text-[var(--color-text)]">
-              Hero image <span className="text-xs font-normal text-[var(--color-muted)]">(optional)</span>
+            <label className={`mb-1.5 block text-sm font-semibold ${text}`}>
+              Hero image <span className={`text-xs font-normal ${muted}`}>(optional)</span>
             </label>
             <BlogImageUploader
               value={form.imageUrl || null}
@@ -217,14 +228,14 @@ function BlogFormModal({
           </div>
 
           {/* Featured toggle */}
-          <div className="flex items-center justify-between p-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-pill-bg)]">
+          <div className={`flex items-center justify-between rounded-2xl border p-4 ${isDark ? "border-dark-border bg-dark-bg" : "border-light-grey bg-very-light-grey"}`}>
             <div>
-              <p className="text-sm font-semibold text-[var(--color-text)]">Featured Article</p>
-              <p className="text-xs text-[var(--color-muted)] mt-0.5">Show this article in the Featured section</p>
+              <p className={`text-sm font-semibold ${text}`}>Featured Article</p>
+              <p className={`mt-0.5 text-xs ${muted}`}>Show this article in the Featured section</p>
             </div>
             <button
               onClick={() => set("isFeatured", !form.isFeatured)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.isFeatured ? "bg-blue-600" : "bg-[var(--color-dark-border)]"}`}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.isFeatured ? "bg-primary-blue" : isDark ? "bg-dark-border" : "bg-light-grey"}`}
             >
               <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${form.isFeatured ? "translate-x-6" : "translate-x-1"}`} />
             </button>
@@ -232,7 +243,7 @@ function BlogFormModal({
 
           {/* Body */}
           <div>
-            <label className="block text-sm font-semibold mb-1.5 text-[var(--color-text)]">
+            <label className={`mb-1.5 block text-sm font-semibold ${text}`}>
               Content <span className="text-red-500">*</span>
             </label>
             <textarea
@@ -240,24 +251,24 @@ function BlogFormModal({
               onChange={e => set("body", e.target.value)}
               rows={10}
               placeholder={"Write your article content here...\n\nUse double line breaks to separate paragraphs.\nUse **Heading** for section headings."}
-              className="w-full rounded-lg border px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none bg-[var(--color-input-bg)] border-[var(--color-border)] text-[var(--color-text)] placeholder:text-[var(--color-muted)]"
+              className={`${inputCls} resize-none`}
             />
-            <p className="text-xs text-[var(--color-muted)] mt-1">{(form.body.trim().split(/\s+/).filter(Boolean).length)} words · {readingTime(form.body)}</p>
+            <p className={`mt-1 text-xs ${muted}`}>{(form.body.trim().split(/\s+/).filter(Boolean).length)} words · {readingTime(form.body)}</p>
           </div>
         </div>
 
         {/* Modal footer */}
-        <div className="flex items-center justify-end gap-3 p-6 border-t border-[var(--color-border)]">
+        <div className={`flex items-center justify-end gap-3 p-6 border-t ${isDark ? "border-dark-border" : "border-light-grey"}`}>
           <button
             onClick={onClose}
-            className="px-5 py-2 rounded-lg text-sm font-semibold transition bg-[var(--color-dark-card-alt)] text-[var(--color-dark-text-secondary)] hover:bg-[var(--color-dark-border)]"
+            className={`rounded-2xl border px-5 py-2.5 text-sm font-semibold transition ${isDark ? "border-dark-border text-dark-text-secondary hover:bg-dark-bg" : "border-light-grey text-dark-charcoal/70 hover:bg-very-light-grey"}`}
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-5 py-2 rounded-lg text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 transition flex items-center gap-2"
+            className="flex items-center gap-2 rounded-2xl bg-primary-blue px-6 py-2.5 text-sm font-semibold text-pure-white transition hover:bg-primary-blue/90 disabled:opacity-60"
           >
             {saving && <span className="inline-block h-4 w-4 rounded-full border-2 border-white border-t-transparent animate-spin" />}
             {initial.title ? "Save Changes" : "Publish Article"}
@@ -281,76 +292,80 @@ function BlogCard({
   onDelete: (blog: BlogDto) => void;
   onToggle: (blog: BlogDto) => void;
 }) {
-  const [deleting, setDeleting] = useState(false);
+  const { isDark } = useTheme();
+  const text = isDark ? "text-dark-text" : "text-dark-charcoal";
+  const muted = isDark ? "text-dark-text-muted" : "text-dark-charcoal/50";
 
   return (
-    <div className="rounded-xl border overflow-hidden transition hover:shadow-md bg-[var(--color-card)] border-[var(--color-border)]">
+    <div className={`overflow-hidden rounded-3xl border shadow-sm transition hover:shadow-md ${isDark ? "border-dark-border bg-dark-card" : "border-light-grey bg-pure-white"}`}>
       <div className="flex">
         {/* Thumbnail */}
-        <div className="w-36 shrink-0 bg-[var(--color-pill-bg)] flex items-center justify-center">
+        <div className={`flex w-36 shrink-0 items-center justify-center ${isDark ? "bg-dark-bg" : "bg-very-light-grey"}`}>
           {blog.imageUrl ? (
-            <img src={blog.imageUrl} alt="" className="w-full h-full object-cover" />
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={blog.imageUrl} alt="" className="h-full w-full object-cover" />
           ) : (
             <div className="flex flex-col items-center gap-1 p-4">
-              <svg className="w-8 h-8 text-[var(--color-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg className={`h-8 w-8 ${muted}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
               </svg>
-              <span className="text-xs text-[var(--color-muted)]">{blog.imageKey}</span>
+              <span className={`text-xs ${muted}`}>{blog.imageKey}</span>
             </div>
           )}
         </div>
 
         {/* Content */}
-        <div className="flex-1 p-4 flex flex-col gap-2">
+        <div className="flex flex-1 flex-col gap-2 p-5">
           <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex flex-wrap items-center gap-2">
               <CategoryBadge category={blog.category} />
               {blog.isFeatured && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
                   Featured
                 </span>
               )}
             </div>
-            <span className="text-xs shrink-0 text-[var(--color-muted)]">{readingTime(blog.body)}</span>
+            <span className={`shrink-0 text-xs ${muted}`}>{readingTime(blog.body)}</span>
           </div>
 
-          <h3 className="font-bold text-sm leading-snug line-clamp-2 text-[var(--color-text)]">
+          <h3 className={`line-clamp-2 text-sm font-bold leading-snug ${text}`}>
             {blog.title}
           </h3>
 
-          <p className="text-xs line-clamp-2 text-[var(--color-muted)]">
+          <p className={`line-clamp-2 text-xs ${muted}`}>
             {blog.body}
           </p>
 
-          <div className="flex items-center gap-1 text-xs mt-auto text-[var(--color-muted)]">
-            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className={`mt-auto flex items-center gap-1 text-xs ${muted}`}>
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
             {formatDate(blog.createdAt)}
           </div>
 
           {/* Action row */}
-          <div className="flex items-center gap-2 pt-1 flex-wrap">
+          <div className="flex flex-wrap items-center gap-2 pt-1">
             <button
               onClick={() => onToggle(blog)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${
+              className={`rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
                 blog.isFeatured
-                  ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100"
-                  : "border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-hover)]"
+                  ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                  : isDark
+                    ? "border-dark-border text-dark-text-muted hover:bg-dark-bg"
+                    : "border-light-grey text-dark-charcoal/60 hover:bg-very-light-grey"
               }`}
             >
               {blog.isFeatured ? "Unfeature" : "Feature"}
             </button>
             <button
               onClick={() => onEdit(blog)}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition"
+              className="rounded-xl border border-primary-blue/30 bg-primary-blue/5 px-3 py-1.5 text-xs font-semibold text-primary-blue transition hover:bg-primary-blue hover:text-pure-white"
             >
               Edit
             </button>
             <button
               onClick={() => onDelete(blog)}
-              disabled={deleting}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-red-200 bg-red-50 text-red-700 hover:bg-red-100 transition disabled:opacity-60"
+              className="rounded-xl border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-600 hover:text-white dark:bg-red-900/20"
             >
               Delete
             </button>
@@ -375,13 +390,14 @@ export default function BlogPage() {
   const [showModal, setShowModal] = useState(false);
   const [editTarget, setEditTarget] = useState<BlogDto | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<BlogDto | null>(null);
-  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
-  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const text = isDark ? "text-dark-text" : "text-dark-charcoal";
+  const muted = isDark ? "text-dark-text-muted" : "text-dark-charcoal/50";
+  const card = `rounded-3xl border transition-colors ${isDark ? "border-dark-border bg-dark-card" : "border-light-grey bg-pure-white"}`;
 
   const showToast = useCallback((msg: string, ok = true) => {
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    setToast({ msg, ok });
-    toastTimer.current = setTimeout(() => setToast(null), 3500);
+    if (ok) toast.success(msg);
+    else toast.error(msg);
   }, []);
 
   const loadBlogs = useCallback(async (category = "All") => {
@@ -499,31 +515,24 @@ export default function BlogPage() {
   const categoryCount = new Set(blogs.map(b => b.category)).size;
 
   return (
-    <div className="min-h-screen p-6 bg-[var(--color-bg)] text-[var(--color-text)]">
-      {/* Toast */}
-      {toast && (
-        <div className={`fixed top-6 right-6 z-50 px-5 py-3 rounded-xl shadow-xl text-sm font-semibold transition-all ${toast.ok ? "bg-emerald-600 text-white" : "bg-red-600 text-white"}`}>
-          {toast.msg}
-        </div>
-      )}
-
+    <section className="space-y-6">
       {/* Inline delete confirmation bar */}
       {deleteTarget && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 rounded-2xl bg-[var(--color-card)] border border-red-200 shadow-xl px-5 py-3 animate-in slide-in-from-bottom-4">
-          <span className="text-sm font-medium text-[var(--color-text)] max-w-xs truncate">
+        <div className={`fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-4 rounded-2xl border border-red-200 px-5 py-3 shadow-xl ${isDark ? "bg-dark-card" : "bg-pure-white"}`}>
+          <span className={`max-w-xs truncate text-sm font-medium ${text}`}>
             Delete &ldquo;{deleteTarget.title}&rdquo;?
           </span>
           <button
             type="button"
             onClick={() => handleDelete(deleteTarget)}
-            className="text-sm font-bold text-red-600 hover:text-red-700 transition-colors"
+            className="text-sm font-bold text-red-600 transition-colors hover:text-red-700"
           >
             Delete
           </button>
           <button
             type="button"
             onClick={() => setDeleteTarget(null)}
-            className="text-sm font-medium text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors"
+            className={`text-sm font-medium transition-colors ${muted} hover:${text}`}
           >
             Cancel
           </button>
@@ -531,42 +540,35 @@ export default function BlogPage() {
       )}
 
       {/* Page header */}
-      <div className="mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-[var(--color-text)]">Blog Management</h1>
-          <p className="text-sm mt-1 text-[var(--color-muted)]">
+          <h1 className={`text-3xl font-semibold ${text}`}>Blog Management</h1>
+          <p className={`mt-1 text-sm ${muted}`}>
             Manage public blog articles and featured content
           </p>
         </div>
         <button
           onClick={() => { setEditTarget(null); setShowModal(true); }}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition shadow-md"
+          className="inline-flex items-center gap-2 rounded-2xl bg-primary-blue px-5 py-2.5 text-sm font-semibold text-pure-white shadow-sm transition hover:bg-primary-blue/90"
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
           New Article
         </button>
-      </div>
+      </header>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-8">
-        {[
-          { label: "Total Articles", value: blogs.length },
-          { label: "Featured",       value: featuredCount },
-          { label: "Categories",     value: categoryCount },
-        ].map(stat => (
-          <div key={stat.label} className="rounded-xl border p-5 bg-[var(--color-card)] border-[var(--color-border)]">
-            <div className="text-2xl font-bold text-[var(--color-text)]">{stat.value}</div>
-            <div className="text-xs mt-1 text-[var(--color-muted)]">{stat.label}</div>
-          </div>
-        ))}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <OverviewCard title="Total Articles" value={String(blogs.length)} />
+        <OverviewCard title="Featured" value={String(featuredCount)} />
+        <OverviewCard title="Categories" value={String(categoryCount)} />
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
-        <div className="flex items-center gap-2 flex-1 rounded-xl border px-4 py-2.5 bg-[var(--color-card)] border-[var(--color-border)]">
-          <svg className="w-4 h-4 text-[var(--color-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <div className={`flex flex-1 items-center gap-2 rounded-2xl border px-4 py-2.5 transition-colors ${isDark ? "border-dark-border bg-dark-card" : "border-light-grey bg-pure-white"}`}>
+          <svg className={`h-4 w-4 ${muted}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input
@@ -574,18 +576,20 @@ export default function BlogPage() {
             placeholder="Search articles..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="flex-1 text-sm bg-transparent outline-none text-[var(--color-text)] placeholder:text-[var(--color-muted)]"
+            className={`flex-1 bg-transparent text-sm outline-none ${text} placeholder:${muted}`}
           />
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex flex-wrap gap-2">
           {filterTabs.map(cat => (
             <button
               key={cat}
               onClick={() => handleFilterCat(cat)}
-              className={`px-3 py-2 rounded-xl text-xs font-semibold transition ${
+              className={`rounded-xl px-3 py-2 text-xs font-semibold transition ${
                 filterCat === cat
-                  ? "bg-blue-600 text-white"
-                  : "bg-[var(--color-card)] border border-[var(--color-border)] text-[var(--color-muted)] hover:bg-[var(--color-hover)]"
+                  ? "bg-primary-blue text-pure-white"
+                  : isDark
+                    ? "border border-dark-border bg-dark-card text-dark-text-muted hover:bg-dark-bg"
+                    : "border border-light-grey bg-pure-white text-dark-charcoal/60 hover:bg-very-light-grey"
               }`}
             >
               {cat}
@@ -596,29 +600,29 @@ export default function BlogPage() {
 
       {/* Content */}
       {loading ? (
-        <div className="flex items-center justify-center h-40">
-          <div className="h-8 w-8 rounded-full border-4 border-blue-600 border-t-transparent animate-spin" />
+        <div className="flex h-40 items-center justify-center">
+          <div className={`h-10 w-10 animate-spin rounded-full border-4 ${isDark ? "border-dark-border border-t-primary-blue" : "border-light-grey border-t-primary-blue"}`} />
         </div>
       ) : error ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-8 text-center">
-          <p className="text-red-700 font-semibold">{error}</p>
+        <div className="rounded-3xl border border-red-200 bg-red-50 p-8 text-center dark:border-red-800 dark:bg-red-900/20">
+          <p className="font-semibold text-red-700 dark:text-red-300">{error}</p>
           <button onClick={() => void loadBlogs()} className="mt-3 text-sm text-red-600 underline">Retry</button>
         </div>
       ) : displayed.length === 0 ? (
-        <div className="rounded-xl border p-16 text-center border-[var(--color-border)] bg-[var(--color-card)]">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400">
+        <div className={`${card} p-16 text-center`}>
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary-blue/15 text-primary-blue">
             <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden>
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z" />
             </svg>
           </div>
-          <p className="text-lg font-semibold text-[var(--color-text)]">No articles found</p>
-          <p className="text-sm text-[var(--color-muted)] mt-1">
+          <p className={`text-lg font-semibold ${text}`}>No articles found</p>
+          <p className={`mt-1 text-sm ${muted}`}>
             {blogs.length === 0 ? "Create your first article to get started." : "Try adjusting your filters."}
           </p>
           {blogs.length === 0 && (
             <button
               onClick={() => { setEditTarget(null); setShowModal(true); }}
-              className="mt-4 px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition"
+              className="mt-4 rounded-2xl bg-primary-blue px-5 py-2.5 text-sm font-semibold text-pure-white transition hover:bg-primary-blue/90"
             >
               Create First Article
             </button>
@@ -626,7 +630,7 @@ export default function BlogPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          <p className="text-sm text-[var(--color-muted)]">
+          <p className={`text-sm ${muted}`}>
             Showing {displayed.length} of {blogs.length} articles
           </p>
           {displayed.map(blog => (
@@ -648,6 +652,6 @@ export default function BlogPage() {
         onClose={() => setShowModal(false)}
         onSave={handleSave}
       />
-    </div>
+    </section>
   );
 }
