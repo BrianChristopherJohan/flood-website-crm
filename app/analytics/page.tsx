@@ -10,6 +10,7 @@ import {
   Legend,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Scatter,
   ScatterChart,
@@ -37,6 +38,7 @@ import {
   ChartTooltipShell,
   TooltipRow,
 } from "@/components/charts/ChartTooltip";
+import { getBatteryStatus } from "@/lib/types";
 import type { IoTNode, IoTStatsSummary } from "@/lib/floodwatch/types";
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -294,6 +296,38 @@ export default function AnalyticsPage() {
           name: node.node_id,
           level: node.water_level,
         })),
+    [nodes],
+  );
+
+  // Sensor battery health — nodes that report a battery voltage, worst-first.
+  // Each bar is coloured by its health band (getBatteryStatus); reference
+  // lines mark the Critical (3.3 V) and Low (3.6 V) thresholds.
+  const batteryData = useMemo(
+    () =>
+      nodes
+        .filter((n) => typeof n.battery_voltage === "number" && n.battery_voltage > 0.5)
+        .sort((a, b) => a.battery_voltage - b.battery_voltage)
+        .slice(0, 16)
+        .map((n) => {
+          const status = getBatteryStatus(n.battery_voltage);
+          return {
+            name: n.node_id.slice(-6),
+            fullId: n.node_id,
+            voltage: Number(n.battery_voltage.toFixed(2)),
+            hex: status.hex,
+            label: status.label,
+            pct: status.pct,
+          };
+        }),
+    [nodes],
+  );
+
+  const batteryNeedsAttention = useMemo(
+    () =>
+      nodes.filter((n) => {
+        const sev = getBatteryStatus(n.battery_voltage).severity;
+        return sev === "low" || sev === "critical" || sev === "dead";
+      }).length,
     [nodes],
   );
 
@@ -788,6 +822,79 @@ export default function AnalyticsPage() {
           </div>
         </article>
       </div>
+
+      {/* ─── Row 4: Sensor Battery Health ──────────────────────────────────── */}
+      <article className={cardClass}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className={titleClass}>Sensor Battery Health</h2>
+            <p className={subtitleClass}>Live battery voltage per node · worst-first</p>
+          </div>
+          <span
+            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+              batteryNeedsAttention > 0
+                ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                : "bg-status-green/15 text-status-green"
+            }`}
+          >
+            {batteryNeedsAttention > 0
+              ? `${batteryNeedsAttention} need attention`
+              : "All healthy"}
+          </span>
+        </div>
+        <div className="mt-4 h-72 w-full min-w-0">
+          {batteryData.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2">
+              <span className="text-3xl">🔋</span>
+              <p className={emptyTextClass}>No battery readings from live nodes.</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%" minHeight={200} minWidth={0}>
+              <BarChart data={batteryData} barCategoryGap="20%">
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGridColor} />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: chartTextColor }} axisLine={false} tickLine={false} label={{ value: "Node ID", position: "insideBottom", offset: -5, fontSize: 11, fill: chartTextColor }} />
+                <YAxis tick={{ fontSize: 10, fill: chartTextColor }} axisLine={false} tickLine={false} domain={[0, 4.4]} label={{ value: "Battery (V)", angle: -90, position: "insideLeft", fontSize: 11, fill: chartTextColor }} />
+                {/* Health thresholds — Low (3.6 V) and Critical (3.3 V) */}
+                <ReferenceLine y={3.6} stroke="#f59e0b" strokeDasharray="4 4" strokeOpacity={0.6} />
+                <ReferenceLine y={3.3} stroke="#ea580c" strokeDasharray="4 4" strokeOpacity={0.6} />
+                <Tooltip
+                  cursor={{ fill: isDark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }}
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.[0]) return null;
+                    const p = payload[0].payload as { fullId: string; voltage: number; hex: string; label: string; pct: number | null };
+                    return (
+                      <ChartTooltipShell isDark={isDark} title={`Node ${p.fullId}`}>
+                        <TooltipRow label="Battery" value={`${p.voltage} V`} swatchHex={p.hex} />
+                        <TooltipRow label="Status" value={p.label} />
+                        {p.pct !== null && <TooltipRow label="Charge" value={`~${p.pct}%`} />}
+                      </ChartTooltipShell>
+                    );
+                  }}
+                />
+                <Bar dataKey="voltage" name="Battery (V)" radius={[6, 6, 0, 0]}>
+                  {batteryData.map((entry) => (
+                    <Cell key={entry.fullId} fill={entry.hex} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+        {/* Battery legend */}
+        <div className="mt-2 flex flex-wrap items-center justify-center gap-3">
+          {[
+            { label: "Healthy (≥ 3.6V)", hex: "#16a34a" },
+            { label: "Low (3.3–3.6V)", hex: "#f59e0b" },
+            { label: "Critical (< 3.3V)", hex: "#ea580c" },
+            { label: "Dead (≤ 0.5V)", hex: "#dc2626" },
+          ].map((item) => (
+            <div key={item.label} className={`flex items-center gap-1.5 text-[11px] font-medium ${isDark ? "text-dark-text-secondary" : "text-dark-charcoal/70"}`}>
+              <span className="h-3 w-3 rounded-sm" style={{ background: item.hex }} />
+              {item.label}
+            </div>
+          ))}
+        </div>
+      </article>
     </section>
   );
 }

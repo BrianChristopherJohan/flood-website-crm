@@ -6,32 +6,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StatusPill from "@/components/common/StatusPill";
 import { useAuth } from "@/lib/AuthContext";
 import { useTheme } from "@/lib/ThemeContext";
-import { NodeData, getWaterLevelStatus, getNodeStatus, type Zone } from "@/lib/types";
+import { NodeData, getWaterLevelStatus, getNodeStatus, getBatteryStatus } from "@/lib/types";
+import { iotNodeToNodeData } from "@/lib/iotAdapter";
+import type { IoTNode } from "@/lib/floodwatch/types";
 import { usePermissions } from "@/lib/hooks/usePermissions";
 import { useIoTStream } from "@/components/providers/IoTEventProvider";
-
-// ── IoT zone → NodeData adapter ──────────────────────────────────────────────
-//
-// Same pattern as the CRM map page: the sensors page is written
-// against the legacy `NodeData` shape, and the FloodWatch IoT BFF
-// returns `Zone`. Adapt at the boundary so the page logic doesn't
-// need to change.
-function zoneToNodeData(z: Zone): NodeData {
-  return {
-    _id: z.id,
-    node_id: z.nodeId ?? z.id,
-    name: z.name,
-    area: z.area,
-    location: z.area,
-    state: z.state,
-    latitude: z.centroidLat,
-    longitude: z.centroidLng,
-    current_level: z.worstLevel,
-    is_dead: z.allOffline,
-    last_updated: z.lastUpdated ?? new Date().toISOString(),
-    created_at: z.lastUpdated ?? new Date().toISOString(),
-  };
-}
 
 // Export Icon
 function ExportIcon(props: React.SVGProps<SVGSVGElement>) {
@@ -80,6 +59,7 @@ interface SensorTableRow {
   latitude: number;
   longitude: number;
   water_level: number;
+  battery_voltage: number | null;
   is_dead: boolean;
   status: string;
   node_status: string;
@@ -95,6 +75,7 @@ type SortConfig = {
 const columns: { key: keyof SensorTableRow; label: string; sortable?: boolean }[] = [
   { key: "node_id", label: "Node ID", sortable: true },
   { key: "water_level", label: "Water Level", sortable: true },
+  { key: "battery_voltage", label: "Battery", sortable: true },
   { key: "latitude", label: "Latitude", sortable: true },
   { key: "longitude", label: "Longitude", sortable: true },
   { key: "status", label: "Water Status", sortable: true },
@@ -159,11 +140,14 @@ export default function SensorsPage() {
       const search = typeof window !== "undefined" ? window.location.search : "";
       const dsMatch = search.match(/[?&]dataset=([^&]+)/);
       const qs = dsMatch ? `?dataset=${encodeURIComponent(dsMatch[1])}` : "";
-      const response = await fetch(`/api/iot/zones${qs}`, { cache: "no-store" });
-      if (!response.ok) throw new Error("Failed to fetch sensor zones");
-      const zones = (await response.json()) as Zone[];
-      if (!Array.isArray(zones)) throw new Error("Unexpected zones payload");
-      setNodes(zones.map(zoneToNodeData));
+      // Operator sensor inventory uses the full per-node feed (not the
+      // privacy-aggregated zones) so we can surface raw telemetry —
+      // battery, signal — that operators need for maintenance.
+      const response = await fetch(`/api/iot/nodes${qs}`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Failed to fetch sensor nodes");
+      const raw = (await response.json()) as IoTNode[];
+      if (!Array.isArray(raw)) throw new Error("Unexpected nodes payload");
+      setNodes(raw.map(iotNodeToNodeData));
       setLastFetch(new Date());
       setError(null);
       isFirstFetch.current = false;
@@ -228,6 +212,7 @@ export default function SensorsPage() {
         latitude: node.latitude,
         longitude: node.longitude,
         water_level: node.current_level,
+        battery_voltage: typeof node.battery_voltage === "number" ? node.battery_voltage : null,
         is_dead: node.is_dead,
         status: waterStatus.label,
         node_status: nodeStatus.label,
@@ -307,8 +292,9 @@ export default function SensorsPage() {
     // Sort
     if (sortConfig) {
       result = [...result].sort((a, b) => {
-        const valueA = a[sortConfig.key];
-        const valueB = b[sortConfig.key];
+        // Null-safe: nodes without a battery reading sort to the bottom.
+        const valueA = a[sortConfig.key] ?? -Infinity;
+        const valueB = b[sortConfig.key] ?? -Infinity;
 
         if (valueA < valueB) return sortConfig.direction === "asc" ? -1 : 1;
         if (valueA > valueB) return sortConfig.direction === "asc" ? 1 : -1;
@@ -359,13 +345,15 @@ export default function SensorsPage() {
 
   // Export to CSV
   const exportToCSV = () => {
-    const headers = ["Node ID", "Water Level (ft)", "Latitude", "Longitude", "Water Status", "Node Status", "Last Updated", "Created At"];
+    const headers = ["Node ID", "Water Level (ft)", "Battery (V)", "Battery Status", "Latitude", "Longitude", "Water Status", "Node Status", "Last Updated", "Created At"];
     const csvContent = [
       headers.join(","),
       ...filteredRows.map((row) =>
         [
           `"${row.node_id}"`,
           row.water_level,
+          row.battery_voltage !== null ? row.battery_voltage.toFixed(2) : "",
+          `"${getBatteryStatus(row.battery_voltage).label}"`,
           row.latitude,
           row.longitude,
           `"${row.status}"`,
@@ -389,8 +377,8 @@ export default function SensorsPage() {
 
   // Export to Excel
   const exportToExcel = () => {
-    const headers = ["Node ID", "Water Level (ft)", "Latitude", "Longitude", "Water Status", "Node Status", "Last Updated", "Created At"];
-    
+    const headers = ["Node ID", "Water Level (ft)", "Battery (V)", "Battery Status", "Latitude", "Longitude", "Water Status", "Node Status", "Last Updated", "Created At"];
+
     const xmlContent = `<?xml version="1.0" encoding="UTF-8"?>
 <?mso-application progid="Excel.Sheet"?>
 <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
@@ -415,6 +403,8 @@ export default function SensorsPage() {
           (row) => `<Row>
         <Cell ss:StyleID="Data"><Data ss:Type="String">${escapeXml(row.node_id)}</Data></Cell>
         <Cell ss:StyleID="Data"><Data ss:Type="Number">${row.water_level}</Data></Cell>
+        <Cell ss:StyleID="Data"><Data ss:Type="${row.battery_voltage !== null ? "Number" : "String"}">${row.battery_voltage !== null ? row.battery_voltage.toFixed(2) : ""}</Data></Cell>
+        <Cell ss:StyleID="Data"><Data ss:Type="String">${escapeXml(getBatteryStatus(row.battery_voltage).label)}</Data></Cell>
         <Cell ss:StyleID="Data"><Data ss:Type="Number">${row.latitude}</Data></Cell>
         <Cell ss:StyleID="Data"><Data ss:Type="Number">${row.longitude}</Data></Cell>
         <Cell ss:StyleID="Data"><Data ss:Type="String">${escapeXml(row.status)}</Data></Cell>
@@ -458,6 +448,14 @@ export default function SensorsPage() {
 
   // Statistics
   const stats = useMemo(() => {
+    // Battery health — count sensors that need attention. A node is flagged
+    // when its voltage falls into the dead/critical/low bands (see
+    // getBatteryStatus). Nodes with no reading are not counted as low.
+    let lowBattery = 0;
+    for (const n of nodes) {
+      const sev = getBatteryStatus(n.battery_voltage).severity;
+      if (sev === "low" || sev === "critical" || sev === "dead") lowBattery += 1;
+    }
     return {
       total: nodes.length,
       online: nodes.filter((n) => !n.is_dead).length,
@@ -466,6 +464,7 @@ export default function SensorsPage() {
       alert: nodes.filter((n) => n.current_level === 1).length,
       warning: nodes.filter((n) => n.current_level === 2).length,
       critical: nodes.filter((n) => n.current_level === 3).length,
+      lowBattery,
     };
   }, [nodes]);
 
@@ -607,7 +606,7 @@ export default function SensorsPage() {
       </header>
 
       {/* Statistics Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <div className={`rounded-2xl border p-4 transition-colors ${isDark ? "border-dark-border bg-dark-card" : "border-light-grey bg-pure-white"}`}>
           <p className={`text-xs uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>Total Nodes</p>
           <p className={`mt-1 text-2xl font-bold ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>{stats.total}</p>
@@ -632,6 +631,15 @@ export default function SensorsPage() {
         <div className={`rounded-2xl border p-4 transition-colors ${isDark ? "border-dark-border bg-dark-card" : "border-light-grey bg-pure-white"}`}>
           <p className={`text-xs uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>Critical Alerts</p>
           <p className={`mt-1 text-2xl font-bold ${stats.critical > 0 ? "text-status-danger" : "text-status-green"}`}>{stats.critical}</p>
+        </div>
+        <div className={`rounded-2xl border p-4 transition-colors ${isDark ? "border-dark-border bg-dark-card" : "border-light-grey bg-pure-white"}`}>
+          <p className={`text-xs uppercase tracking-wide ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>Battery Health</p>
+          <p className={`mt-1 text-2xl font-bold ${stats.lowBattery > 0 ? "text-status-warning-2" : "text-status-green"}`}>
+            {stats.lowBattery}
+          </p>
+          <p className={`text-xs ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/50"}`}>
+            {stats.lowBattery > 0 ? "need battery attention" : "all batteries healthy"}
+          </p>
         </div>
       </div>
 
@@ -686,7 +694,7 @@ export default function SensorsPage() {
 
       {/* Data Table */}
       <div className={`overflow-x-auto rounded-3xl border transition-colors ${isDark ? "border-dark-border" : "border-light-grey"}`}>
-        <table className={`min-w-[960px] w-full border-collapse text-left text-sm transition-colors ${isDark ? "text-dark-text-secondary" : "text-dark-charcoal"}`}>
+        <table className={`min-w-[1100px] w-full border-collapse text-left text-sm transition-colors ${isDark ? "text-dark-text-secondary" : "text-dark-charcoal"}`}>
           <thead className={`text-xs uppercase tracking-wide transition-colors ${isDark ? "bg-dark-bg text-dark-text-muted" : "bg-light-blue text-dark-charcoal"}`}>
             <tr>
               {columns.map((column) => {
@@ -723,6 +731,24 @@ export default function SensorsPage() {
               >
                 <td className={`px-4 py-3 font-semibold ${isDark ? "text-dark-text" : ""}`}>{row.node_id}</td>
                 <td className="px-4 py-3 text-primary-blue font-bold">{row.water_level} ft</td>
+                <td className="px-4 py-3">
+                  {(() => {
+                    const b = getBatteryStatus(row.battery_voltage);
+                    return (
+                      <span className="inline-flex items-center gap-2" title={b.pct !== null ? `${b.pct}% · ${b.label}` : b.label}>
+                        <span className="font-semibold" style={{ color: b.hex }}>
+                          {row.battery_voltage !== null ? `${row.battery_voltage.toFixed(2)} V` : "—"}
+                        </span>
+                        <span
+                          className="rounded-full px-2 py-0.5 text-[10px] font-bold"
+                          style={{ backgroundColor: `${b.hex}22`, color: b.hex }}
+                        >
+                          {b.label}
+                        </span>
+                      </span>
+                    );
+                  })()}
+                </td>
                 <td className="px-4 py-3">{row.latitude.toFixed(6)}</td>
                 <td className="px-4 py-3">{row.longitude.toFixed(6)}</td>
                 <td className="px-4 py-3">

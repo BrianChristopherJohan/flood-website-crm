@@ -63,6 +63,34 @@ export interface NodeData {
   parent_id?: string;        // LoRa relay (master or upstream node)
 }
 
+/**
+ * Classify a LoRa node battery voltage into an operator-facing health band.
+ * Thresholds match the map InfoWindow so the whole CRM (Sensors, Map,
+ * Analytics, Dashboard) labels battery identically:
+ *   ≤ 0.5 V  → Dead/disconnected (sensor not reporting a real cell)
+ *   < 3.3 V  → Critical (replace soon)
+ *   < 3.6 V  → Low
+ *   ≥ 3.6 V  → Healthy
+ * `pct` is an indicative state-of-charge mapped over a 3.0–4.2 V Li-ion span.
+ */
+export type BatterySeverity = "healthy" | "low" | "critical" | "dead" | "unknown";
+
+export function getBatteryStatus(voltage: number | null | undefined): {
+  label: string;
+  hex: string;
+  severity: BatterySeverity;
+  pct: number | null;
+} {
+  if (typeof voltage !== "number" || !Number.isFinite(voltage)) {
+    return { label: "No data", hex: "#9ca3af", severity: "unknown", pct: null };
+  }
+  const pct = Math.max(0, Math.min(100, Math.round(((voltage - 3.0) / (4.2 - 3.0)) * 100)));
+  if (voltage <= 0.5) return { label: "Dead", hex: "#dc2626", severity: "dead", pct: 0 };
+  if (voltage < 3.3) return { label: "Critical", hex: "#ea580c", severity: "critical", pct };
+  if (voltage < 3.6) return { label: "Low", hex: "#f59e0b", severity: "low", pct };
+  return { label: "Healthy", hex: "#16a34a", severity: "healthy", pct };
+}
+
 // Helper function to determine water level status
 export function getWaterLevelStatus(level: number): {
   label: string;

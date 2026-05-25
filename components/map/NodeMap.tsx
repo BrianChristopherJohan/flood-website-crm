@@ -11,7 +11,7 @@ import {
   useJsApiLoader,
 } from "@react-google-maps/api";
 
-import { NodeData, getStatusLabel, getMarkerColor } from "@/lib/types";
+import { NodeData, getStatusLabel, getMarkerColor, getBatteryStatus } from "@/lib/types";
 
 /**
  * Libraries the Google Maps loader needs to bring in eagerly. We use
@@ -668,30 +668,27 @@ export default function NodeMap({
                   {activeNode.is_dead ? "Offline" : "Online"}
                 </strong>
               </div>
-              {typeof activeNode.battery_voltage === "number" && (
-                <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14 }}>
-                  Battery:{" "}
-                  <strong style={{
-                    color:
-                      activeNode.battery_voltage <= 0.5
-                        ? "#d7263d"        // dead/disconnected
-                        : activeNode.battery_voltage < 3.3
-                          ? "#ea580c"      // critical low
-                          : activeNode.battery_voltage < 3.6
-                            ? "#f59e0b"    // low
-                            : "#16a34a",   // healthy
-                  }}>
-                    {activeNode.battery_voltage.toFixed(2)} V
-                  </strong>
-                  {activeNode.battery_voltage <= 0.5
-                    ? " (replace)"
-                    : activeNode.battery_voltage < 3.3
-                      ? " (critical)"
-                      : activeNode.battery_voltage < 3.6
-                        ? " (low)"
-                        : null}
-                </div>
-              )}
+              {typeof activeNode.battery_voltage === "number" && (() => {
+                const bat = getBatteryStatus(activeNode.battery_voltage);
+                return (
+                  <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span>
+                      Battery:{" "}
+                      <strong style={{ color: bat.hex }}>
+                        {activeNode.battery_voltage.toFixed(2)} V
+                      </strong>
+                      {bat.pct !== null ? ` (~${bat.pct}%)` : ""}
+                    </span>
+                    <span style={{
+                      background: `${bat.hex}22`, color: bat.hex,
+                      fontSize: 10, fontWeight: 700, padding: "1px 6px",
+                      borderRadius: 999,
+                    }}>
+                      {bat.label}
+                    </span>
+                  </div>
+                );
+              })()}
               {activeNode.village_id && (
                 <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14 }}>
                   Village: <strong>{activeNode.village_id}</strong>

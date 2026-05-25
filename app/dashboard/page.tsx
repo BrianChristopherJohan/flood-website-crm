@@ -21,7 +21,7 @@ import NodeMap from "@/components/map/NodeMap";
 import { useAuth } from "@/lib/AuthContext";
 import { authFetchJson } from "@/lib/authFetch";
 import { useTheme } from "@/lib/ThemeContext";
-import { NodeData, getStatusLabel, type Zone } from "@/lib/types";
+import { NodeData, getStatusLabel, getBatteryStatus, type Zone } from "@/lib/types";
 import { useIoTStream } from "@/components/providers/IoTEventProvider";
 import {
   RISK_COLORS,
@@ -37,7 +37,7 @@ import {
 } from "@/lib/floodRiskMock";
 import FloodRiskChart, { type FloodRiskVariant } from "@/components/charts/FloodRiskChart";
 import { ChartTooltipShell, TooltipRow } from "@/components/charts/ChartTooltip";
-import type { IoTStatsSummary } from "@/lib/floodwatch/types";
+import type { IoTNode, IoTStatsSummary } from "@/lib/floodwatch/types";
 
 // ── IoT zone → NodeData adapter (same pattern as map + sensors) ────────────
 function zoneToNodeData(z: Zone): NodeData {
@@ -171,6 +171,9 @@ export default function DashboardPage() {
   // Replaces the old hardcoded "national baseline" state chart with genuine
   // telemetry. Public endpoint — no auth needed.
   const [iotSummary, setIotSummary] = useState<IoTStatsSummary | null>(null);
+  // Battery health across the live sensor network (full per-node feed —
+  // the zones feed above strips raw telemetry). Additive: feeds one KPI card.
+  const [batteryStats, setBatteryStats] = useState<{ attention: number; total: number } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const isFirstFetch = useRef(true);
@@ -244,6 +247,34 @@ export default function DashboardPage() {
         if (!cancelled) setIotSummary(s);
       } catch (error) {
         console.warn("[dashboard] IoT summary fetch failed:", error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Battery health — full per-node feed (dataset=all). Additive; powers the
+  // "Battery Health" KPI card without touching the zone-based map/stats.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/iot/nodes?dataset=all", { cache: "no-store" });
+        if (cancelled || !res.ok) return;
+        const list = (await res.json()) as IoTNode[];
+        if (!Array.isArray(list)) return;
+        let attention = 0;
+        let total = 0;
+        for (const n of list) {
+          const sev = getBatteryStatus(n.battery_voltage).severity;
+          if (sev === "unknown") continue;
+          total += 1;
+          if (sev === "low" || sev === "critical" || sev === "dead") attention += 1;
+        }
+        if (!cancelled) setBatteryStats({ attention, total });
+      } catch (error) {
+        console.warn("[dashboard] battery fetch failed:", error);
       }
     })();
     return () => {
@@ -660,7 +691,7 @@ export default function DashboardPage() {
       </header>
 
       {/* ─── KPI Cards ──────────────────────────────────────────────────────── */}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
         <OverviewCard
           title="Total Nodes"
           value={isLoading ? "..." : String(stats.totalNodes)}
@@ -687,6 +718,21 @@ export default function DashboardPage() {
           value={isLoading ? "..." : `${stats.avgWaterLevel.toFixed(1)}ft`}
           helper={isLoading ? "Loading sensors…" : `${stats.normalNodes} normal / ${stats.alertNodes} alert`}
           trend={{ label: "Live data", direction: "flat" }}
+        />
+        <OverviewCard
+          title="Battery Health"
+          value={!batteryStats ? "..." : String(batteryStats.attention)}
+          helper={
+            !batteryStats
+              ? "Checking batteries…"
+              : batteryStats.attention > 0
+                ? `of ${batteryStats.total} sensors need attention`
+                : `all ${batteryStats.total} sensors healthy`
+          }
+          trend={{
+            label: batteryStats && batteryStats.attention > 0 ? "Low battery" : "Healthy",
+            direction: batteryStats && batteryStats.attention > 0 ? "down" : "flat",
+          }}
         />
       </div>
 
