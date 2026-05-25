@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { communityJavaFetch } from "@/lib/javaApi";
+import { bffToken } from "@/lib/bffAuth";
 
 // The canonical user store is flood-service-community (flood_community DB):
 // customers register there, the admin is seeded there, and the CRM logs in
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 function extractToken(req: NextRequest): string | undefined {
-  return req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? undefined;
+  return bffToken(req);
 }
 
 export async function GET(req: NextRequest) {

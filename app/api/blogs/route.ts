@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { communityJavaFetch } from "@/lib/javaApi";
+import { bffToken } from "@/lib/bffAuth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const token = req.headers.get("authorization")?.replace("Bearer ", "");
+    const token = bffToken(req);
     const body = await req.json();
     const data = await communityJavaFetch<unknown>("/blogs", { method: "POST", body, token });
     return NextResponse.json(data, { status: 201 });

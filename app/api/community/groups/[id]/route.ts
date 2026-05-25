@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { communityJavaFetch } from "@/lib/javaApi";
+import { bffToken } from "@/lib/bffAuth";
 
 export const dynamic = "force-dynamic";
 
 function extractToken(req: NextRequest) {
-  return req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? undefined;
+  return bffToken(req);
 }
 
 export async function DELETE(
