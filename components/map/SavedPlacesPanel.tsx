@@ -20,7 +20,7 @@
  * to delete (with a confirm step).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import type { NodeData } from "@/lib/types";
 
@@ -96,6 +96,30 @@ function countNodesInRadius(
   return out;
 }
 
+interface InRadiusNode { node: NodeData; distM: number; }
+
+/** The actual sensors within a radius, nearest-first. */
+function nodesInRadius(
+  centre: { lat: number; lng: number },
+  radiusKm: number,
+  nodes: NodeData[],
+): InRadiusNode[] {
+  const limit = radiusKm * 1000;
+  const out: InRadiusNode[] = [];
+  for (const n of nodes) {
+    const distM = haversineM(centre, { lat: n.latitude, lng: n.longitude });
+    if (distM <= limit) out.push({ node: n, distM });
+  }
+  return out.sort((a, b) => a.distM - b.distM);
+}
+
+// Per-sensor flood-level presentation (matches the map's severity palette).
+const LEVEL_LABEL = ["Normal", "Alert", "Warning", "Critical"] as const;
+const LEVEL_HEX = ["#16a34a", "#facc15", "#f97316", "#dc2626"] as const;
+const OFFLINE_HEX = "#6b7280";
+const nodeAlertLabel = (n: NodeData): string => LEVEL_LABEL[n.current_level] ?? "Unknown";
+const nodeAlertHex = (n: NodeData): string => LEVEL_HEX[n.current_level] ?? OFFLINE_HEX;
+
 function loadSaved(): SavedPlace[] {
   if (typeof window === "undefined") return [];
   try {
@@ -155,6 +179,58 @@ export default function SavedPlacesPanel({
     ),
     [places, nodes],
   );
+
+  // The actual sensors inside each place's radius (nearest-first), for the
+  // expandable per-place detail list.
+  const inRadius = useMemo(
+    () => places.map((p) =>
+      nodesInRadius({ lat: p.latitude, lng: p.longitude }, p.radiusKm, nodes),
+    ),
+    [places, nodes],
+  );
+
+  // Which place cards have their sensor list expanded.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpand = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  // Reverse-geocode (lat/lng → street address) for the sensors of EXPANDED
+  // places, using the Google Geocoder already loaded by the map on this page
+  // (no extra API key). Results are cached by rounded coord; failures resolve
+  // to a coordinate string so they aren't retried.
+  const [addrCache, setAddrCache] = useState<Record<string, string>>({});
+  const geocodingRef = useRef<Set<string>>(new Set());
+  const coordKey = (lat: number, lng: number) => `${lat.toFixed(5)},${lng.toFixed(5)}`;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (typeof google === "undefined" || !google.maps?.Geocoder) return;
+    const geocoder = new google.maps.Geocoder();
+    places.forEach((p, i) => {
+      if (!expanded.has(p.id)) return;
+      for (const { node } of inRadius[i] ?? []) {
+        const key = coordKey(node.latitude, node.longitude);
+        if (addrCache[key] !== undefined || geocodingRef.current.has(key)) continue;
+        geocodingRef.current.add(key);
+        geocoder.geocode(
+          { location: { lat: node.latitude, lng: node.longitude } },
+          (results, status) => {
+            geocodingRef.current.delete(key);
+            const addr =
+              status === "OK" && results && results[0]
+                ? results[0].formatted_address
+                : `${node.latitude.toFixed(5)}°N, ${node.longitude.toFixed(5)}°E`;
+            setAddrCache((prev) => ({ ...prev, [key]: addr }));
+          },
+        );
+      }
+    });
+  }, [expanded, places, inRadius, addrCache]);
 
   const openAdd = useCallback(() => {
     setEditing(null);
@@ -264,75 +340,154 @@ export default function SavedPlacesPanel({
         <ul className="space-y-2">
           {places.map((p, i) => {
             const t = totals[i];
+            const inR = inRadius[i] ?? [];
+            const isOpen = expanded.has(p.id);
             return (
               <li
                 key={p.id}
-                className={`flex items-center justify-between rounded-2xl border px-4 py-3 ${rowBg}`}
+                className={`rounded-2xl border px-4 py-3 ${rowBg}`}
               >
-                <button
-                  type="button"
-                  onClick={() => onFocusPlace?.(p.latitude, p.longitude)}
-                  className="flex-1 text-left"
-                >
-                  <p className={`text-sm font-semibold ${body}`}>{p.label}</p>
-                  <p className={`text-xs ${sub}`}>
-                    Radius {p.radiusKm} km · {p.latitude.toFixed(4)}°N, {p.longitude.toFixed(4)}°E
-                  </p>
-                  <p className={`mt-1 text-xs ${muted}`}>
-                    <strong className={body}>{t.total}</strong> sensor{t.total === 1 ? "" : "s"} in range
-                    {t.total > 0 && (
-                      <>
-                        {" · "}
-                        <span className="text-status-green">{t.normal} normal</span>
-                        {t.alert > 0 && <>{" · "}<span className="text-status-warning-1">{t.alert} alert</span></>}
-                        {t.warning > 0 && <>{" · "}<span className="text-status-warning-2">{t.warning} warning</span></>}
-                        {t.critical > 0 && <>{" · "}<span className="text-status-danger">{t.critical} critical</span></>}
-                        {t.offline > 0 && <>{" · "}<span className={muted}>{t.offline} offline</span></>}
-                      </>
-                    )}
-                  </p>
-                </button>
-                <div className="ml-3 flex items-center gap-1">
+                <div className="flex items-center justify-between">
                   <button
                     type="button"
-                    onClick={() => openEdit(p)}
-                    aria-label="Edit place"
-                    title="Edit"
-                    className={`flex h-7 w-7 items-center justify-center rounded-lg text-xs transition ${
-                      isDark ? "hover:bg-dark-border" : "hover:bg-light-grey"
-                    } ${sub}`}
+                    onClick={() => onFocusPlace?.(p.latitude, p.longitude)}
+                    className="flex-1 text-left"
                   >
-                    ✎
+                    <p className={`text-sm font-semibold ${body}`}>{p.label}</p>
+                    <p className={`text-xs ${sub}`}>
+                      Radius {p.radiusKm} km · {p.latitude.toFixed(4)}°N, {p.longitude.toFixed(4)}°E
+                    </p>
+                    <p className={`mt-1 text-xs ${muted}`}>
+                      <strong className={body}>{t.total}</strong> sensor{t.total === 1 ? "" : "s"} in range
+                      {t.total > 0 && (
+                        <>
+                          {" · "}
+                          <span className="text-status-green">{t.normal} normal</span>
+                          {t.alert > 0 && <>{" · "}<span className="text-status-warning-1">{t.alert} alert</span></>}
+                          {t.warning > 0 && <>{" · "}<span className="text-status-warning-2">{t.warning} warning</span></>}
+                          {t.critical > 0 && <>{" · "}<span className="text-status-danger">{t.critical} critical</span></>}
+                          {t.offline > 0 && <>{" · "}<span className={muted}>{t.offline} offline</span></>}
+                        </>
+                      )}
+                    </p>
                   </button>
-                  {pendingDelete === p.id ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(p.id)}
-                        className="rounded-lg bg-status-danger px-2 py-1 text-[10px] font-semibold text-pure-white"
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPendingDelete(null)}
-                        className={`rounded-lg px-2 py-1 text-[10px] font-semibold ${sub}`}
-                      >
-                        Cancel
-                      </button>
-                    </>
-                  ) : (
+                  <div className="ml-3 flex items-center gap-1">
                     <button
                       type="button"
-                      onClick={() => setPendingDelete(p.id)}
-                      aria-label="Delete place"
-                      title="Delete"
-                      className={`flex h-7 w-7 items-center justify-center rounded-lg text-xs transition hover:bg-status-danger/20 hover:text-status-danger ${sub}`}
+                      onClick={() => openEdit(p)}
+                      aria-label="Edit place"
+                      title="Edit"
+                      className={`flex h-7 w-7 items-center justify-center rounded-lg text-xs transition ${
+                        isDark ? "hover:bg-dark-border" : "hover:bg-light-grey"
+                      } ${sub}`}
                     >
-                      ✕
+                      ✎
                     </button>
-                  )}
+                    {pendingDelete === p.id ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(p.id)}
+                          className="rounded-lg bg-status-danger px-2 py-1 text-[10px] font-semibold text-pure-white"
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPendingDelete(null)}
+                          className={`rounded-lg px-2 py-1 text-[10px] font-semibold ${sub}`}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setPendingDelete(p.id)}
+                        aria-label="Delete place"
+                        title="Delete"
+                        className={`flex h-7 w-7 items-center justify-center rounded-lg text-xs transition hover:bg-status-danger/20 hover:text-status-danger ${sub}`}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {/* Detected sensors within radius: node id + alert level +
+                    online/offline + reverse-geocoded address. Scrollable. */}
+                {t.total > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => toggleExpand(p.id)}
+                      aria-expanded={isOpen}
+                      className={`mt-2 flex w-full items-center justify-center gap-1 rounded-lg border py-1 text-[11px] font-semibold transition ${
+                        isDark ? "border-dark-border hover:bg-dark-border/40" : "border-light-grey hover:bg-light-grey/60"
+                      } ${sub}`}
+                    >
+                      {isOpen ? "Hide sensors" : `Show ${t.total} sensor${t.total === 1 ? "" : "s"}`}
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                           stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                           className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-180" : ""}`} aria-hidden>
+                        <path d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
+
+                    {isOpen && (
+                      <div className={`mt-2 max-h-64 overflow-y-auto rounded-xl border ${isDark ? "border-dark-border" : "border-light-grey"}`}>
+                        <ul className={`divide-y ${isDark ? "divide-dark-border" : "divide-light-grey"}`}>
+                          {inR.map(({ node, distM }) => {
+                            const offline = node.is_dead;
+                            const key = coordKey(node.latitude, node.longitude);
+                            const addr = addrCache[key];
+                            return (
+                              <li key={node._id}>
+                                <button
+                                  type="button"
+                                  onClick={() => onFocusPlace?.(node.latitude, node.longitude)}
+                                  title="Focus this sensor on the map"
+                                  className={`flex w-full flex-col gap-1 px-3 py-2 text-left transition ${
+                                    isDark ? "hover:bg-dark-border/40" : "hover:bg-light-grey/50"
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="h-2 w-2 flex-shrink-0 rounded-full"
+                                          style={{ backgroundColor: offline ? OFFLINE_HEX : nodeAlertHex(node) }} aria-hidden />
+                                    <span className={`truncate font-mono text-xs font-semibold ${body}`}>{node.node_id}</span>
+                                    <span className="ml-auto flex flex-shrink-0 items-center gap-1.5">
+                                      <span className="rounded-full px-1.5 py-0.5 text-[9px] font-bold"
+                                            style={offline
+                                              ? { background: "rgba(107,114,128,0.18)", color: OFFLINE_HEX }
+                                              : { background: `${nodeAlertHex(node)}26`, color: nodeAlertHex(node) }}>
+                                        {offline ? "—" : nodeAlertLabel(node)}
+                                      </span>
+                                      <span className="rounded-full px-1.5 py-0.5 text-[9px] font-bold"
+                                            style={offline
+                                              ? { background: "rgba(107,114,128,0.18)", color: OFFLINE_HEX }
+                                              : { background: "rgba(22,163,74,0.15)", color: "#16a34a" }}>
+                                        {offline ? "Offline" : "Online"}
+                                      </span>
+                                      <span className={`text-[10px] tabular-nums ${muted}`}>{(distM / 1000).toFixed(2)} km</span>
+                                    </span>
+                                  </div>
+                                  <span className={`flex items-start gap-1 text-[10px] leading-snug ${muted}`}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                                         stroke="currentColor" strokeWidth="2" className="mt-px h-3 w-3 flex-shrink-0" aria-hidden>
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+                                    </svg>
+                                    <span>{addr ?? "Resolving address…"}</span>
+                                  </span>
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+                  </>
+                )}
               </li>
             );
           })}
