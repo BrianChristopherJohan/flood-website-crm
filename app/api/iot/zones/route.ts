@@ -35,6 +35,25 @@ import {
   type RawSensorRow,
 } from "@/lib/zoneAggregate";
 import type { FloodLevel } from "@/lib/types";
+import { withCache } from "@/lib/redis";
+
+/**
+ * Short server-side cache TTL (seconds) for the aggregated zone feed.
+ *
+ * The upstream FloodWatch IoT FastAPI is cold-started and slow on the
+ * first hit, so an un-cached dashboard/map load can take several
+ * seconds. We cache the *already-anonymised* `aggregateZones` output
+ * (hashed IDs, lat/lng rounded to ~11 m) in Redis for a few seconds —
+ * repeated loads and tab switches then return in single-digit ms while
+ * the data stays effectively real-time. 12 s is short enough that the
+ * SSE-driven refetch still surfaces fresh readings promptly.
+ *
+ * NOTE: this is a *server-side* cache of the privacy-safe output only.
+ * The HTTP `Cache-Control: no-store` header below is preserved so the
+ * browser/edge still never caches the response — the privacy boundary
+ * is unchanged.
+ */
+const ZONES_CACHE_TTL = 12;
 
 /**
  * Deterministic small-circle jitter for nodes without a GPS fix. We
@@ -68,53 +87,62 @@ export async function GET(req: NextRequest) {
     | undefined;
 
   try {
-    const [nodes, villages] = await Promise.all([
-      floodwatchFetch<IoTNode[]>("/nodes", {
-        params: dataset ? { dataset } : undefined,
-      }),
-      floodwatchFetch<IoTVillage[]>("/villages", {
-        params: dataset ? { dataset } : undefined,
-      }).catch(() => [] as IoTVillage[]),
-    ]);
+    // Cache-aside on the anonymised output. `withCache` fails open: a
+    // Redis hiccup just falls through to a live fetch, so correctness
+    // never depends on the cache being up.
+    const zones = await withCache(
+      `iot:zones:${dataset ?? "default"}`,
+      ZONES_CACHE_TTL,
+      async () => {
+        const [nodes, villages] = await Promise.all([
+          floodwatchFetch<IoTNode[]>("/nodes", {
+            params: dataset ? { dataset } : undefined,
+          }),
+          floodwatchFetch<IoTVillage[]>("/villages", {
+            params: dataset ? { dataset } : undefined,
+          }).catch(() => [] as IoTVillage[]),
+        ]);
 
-    const villageCoords = new Map<string, { lat: number; lng: number }>();
-    for (const v of villages) {
-      if (typeof v.lat === "number" && typeof v.lng === "number") {
-        villageCoords.set(v.village_id, { lat: v.lat, lng: v.lng });
-      }
-    }
-
-    const rows: RawSensorRow[] = nodes.map((n) => {
-      // Coordinate resolution order:
-      //   1. calibrated install GPS (`install_lat/install_lng`)
-      //   2. live GPS fix (`lat/lng`) when present and non-zero
-      //   3. village centroid + deterministic per-node jitter (~80 m)
-      let lat = n.install_lat ?? n.lat ?? 0;
-      let lng = n.install_lng ?? n.lng ?? 0;
-      if (!Number(lat) || !Number(lng)) {
-        const v = villageCoords.get(n.village_id);
-        if (v) {
-          const { dLat, dLng } = jitterFromNodeId(n.node_id);
-          lat = v.lat + dLat;
-          lng = v.lng + dLng;
+        const villageCoords = new Map<string, { lat: number; lng: number }>();
+        for (const v of villages) {
+          if (typeof v.lat === "number" && typeof v.lng === "number") {
+            villageCoords.set(v.village_id, { lat: v.lat, lng: v.lng });
+          }
         }
-      }
-      return {
-        id: n.node_id,
-        nodeId: n.node_id,
-        name: null,
-        area: n.village_id,
-        location: n.village_id,
-        state: "Sabah",
-        latitude: Number(lat) || 0,
-        longitude: Number(lng) || 0,
-        currentLevel: (n.water_level ?? 0) as FloodLevel,
-        status: n.status === "offline" ? "inactive" : "active",
-        lastUpdated: n.last_seen,
-      };
-    });
 
-    const zones = aggregateZones(rows);
+        const rows: RawSensorRow[] = nodes.map((n) => {
+          // Coordinate resolution order:
+          //   1. calibrated install GPS (`install_lat/install_lng`)
+          //   2. live GPS fix (`lat/lng`) when present and non-zero
+          //   3. village centroid + deterministic per-node jitter (~80 m)
+          let lat = n.install_lat ?? n.lat ?? 0;
+          let lng = n.install_lng ?? n.lng ?? 0;
+          if (!Number(lat) || !Number(lng)) {
+            const v = villageCoords.get(n.village_id);
+            if (v) {
+              const { dLat, dLng } = jitterFromNodeId(n.node_id);
+              lat = v.lat + dLat;
+              lng = v.lng + dLng;
+            }
+          }
+          return {
+            id: n.node_id,
+            nodeId: n.node_id,
+            name: null,
+            area: n.village_id,
+            location: n.village_id,
+            state: "Sabah",
+            latitude: Number(lat) || 0,
+            longitude: Number(lng) || 0,
+            currentLevel: (n.water_level ?? 0) as FloodLevel,
+            status: n.status === "offline" ? "inactive" : "active",
+            lastUpdated: n.last_seen,
+          };
+        });
+
+        return aggregateZones(rows);
+      },
+    );
 
     return new NextResponse(JSON.stringify(zones), {
       status: 200,

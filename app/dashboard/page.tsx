@@ -411,13 +411,13 @@ export default function DashboardPage() {
         <OverviewCard
           title="Total Nodes"
           value={isLoading ? "..." : String(stats.totalNodes)}
-          helper={`${stats.activeNodes} online / ${stats.inactiveNodes} offline`}
+          helper={isLoading ? "Loading sensors…" : `${stats.activeNodes} online / ${stats.inactiveNodes} offline`}
           trend={{ label: "Live Data", direction: "up" }}
         />
         <OverviewCard
           title="Water Level Status"
           value={isLoading ? "..." : `${stats.criticalNodes + stats.warningNodes}`}
-          helper={`${stats.criticalNodes} critical / ${stats.warningNodes} warning`}
+          helper={isLoading ? "Loading sensors…" : `${stats.criticalNodes} critical / ${stats.warningNodes} warning`}
           trend={{ label: "Real-time", direction: stats.criticalNodes > 0 ? "down" : "flat" }}
         />
         <OverviewCard
@@ -432,7 +432,7 @@ export default function DashboardPage() {
         <OverviewCard
           title="Average Water Level"
           value={isLoading ? "..." : `${stats.avgWaterLevel.toFixed(1)}ft`}
-          helper={`${stats.normalNodes} normal / ${stats.alertNodes} alert`}
+          helper={isLoading ? "Loading sensors…" : `${stats.normalNodes} normal / ${stats.alertNodes} alert`}
           trend={{ label: "Live data", direction: "flat" }}
         />
       </div>
@@ -464,7 +464,7 @@ export default function DashboardPage() {
               </p>
             </div>
             <span className="rounded-full bg-light-blue px-4 py-1 text-xs font-semibold text-primary-blue dark:bg-primary-blue/20">
-              {nodes.length} nodes
+              {isLoading ? "…" : `${nodes.length} nodes`}
             </span>
           </div>
           <div className="mt-4 overflow-x-auto max-h-[320px]">
@@ -582,7 +582,7 @@ export default function DashboardPage() {
             </div>
             <div className="flex items-center gap-3">
               <span className="text-sm font-semibold text-primary-blue">
-                Online: {stats.activeNodes}
+                Online: {isLoading ? "…" : stats.activeNodes}
               </span>
               <Link
                 href="/map"
@@ -593,11 +593,35 @@ export default function DashboardPage() {
             </div>
           </div>
           <div
-            className={`mt-4 rounded-2xl border transition-colors ${
+            className={`mt-4 overflow-hidden rounded-2xl border transition-colors ${
               isDark ? "border-dark-border" : "border-light-grey"
             }`}
           >
-            <NodeMap nodes={nodes} height={280} zoom={12} />
+            {isLoading ? (
+              <div
+                className={`flex flex-col items-center justify-center gap-3 ${
+                  isDark ? "bg-dark-bg" : "bg-very-light-grey"
+                }`}
+                style={{ height: 280 }}
+              >
+                <div
+                  className={`h-8 w-8 animate-spin rounded-full border-4 ${
+                    isDark
+                      ? "border-dark-border border-t-primary-blue"
+                      : "border-light-grey border-t-primary-blue"
+                  }`}
+                />
+                <span
+                  className={`text-xs font-medium ${
+                    isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"
+                  }`}
+                >
+                  Loading sensor map…
+                </span>
+              </div>
+            ) : (
+              <NodeMap nodes={nodes} height={280} zoom={12} />
+            )}
           </div>
           <ul
             className={`mt-4 grid grid-cols-2 gap-3 text-xs font-semibold transition-colors ${
@@ -612,7 +636,7 @@ export default function DashboardPage() {
               }`}
             >
               Critical (3ft):{" "}
-              <span className="text-primary-red">{stats.criticalNodes}</span>
+              <span className="text-primary-red">{isLoading ? "…" : stats.criticalNodes}</span>
             </li>
             <li
               className={`rounded-2xl border px-3 py-2 transition-colors ${
@@ -622,7 +646,7 @@ export default function DashboardPage() {
               }`}
             >
               Warning (2ft):{" "}
-              <span className="text-status-warning-2">{stats.warningNodes}</span>
+              <span className="text-status-warning-2">{isLoading ? "…" : stats.warningNodes}</span>
             </li>
             <li
               className={`rounded-2xl border px-3 py-2 transition-colors ${
@@ -632,7 +656,7 @@ export default function DashboardPage() {
               }`}
             >
               Alert (1ft):{" "}
-              <span className="text-status-warning-1">{stats.alertNodes}</span>
+              <span className="text-status-warning-1">{isLoading ? "…" : stats.alertNodes}</span>
             </li>
             <li
               className={`rounded-2xl border px-3 py-2 transition-colors ${
@@ -642,7 +666,7 @@ export default function DashboardPage() {
               }`}
             >
               Normal (0ft):{" "}
-              <span className="text-status-green">{stats.normalNodes}</span>
+              <span className="text-status-green">{isLoading ? "…" : stats.normalNodes}</span>
             </li>
           </ul>
         </article>
