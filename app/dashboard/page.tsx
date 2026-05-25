@@ -110,40 +110,49 @@ export default function DashboardPage() {
     return () => window.removeEventListener("storage", loadSettings);
   }, []);
 
-  // Initial parallel fetch: nodes + analytics (wall time ≈ max of the two, not their sum).
+  // Sensor zones — the FloodWatch IoT BFF (`/api/iot/zones`) is public,
+  // so this runs immediately on mount and does NOT wait for the access
+  // token. Critically, `isLoading` stays true from first render until
+  // this resolves, so the UI shows a spinner — not an empty
+  // "No sensor nodes configured yet" state — while the (slow) upstream
+  // is fetched. Previously this was gated behind `accessToken`, which is
+  // briefly null on mount, so the empty state flashed before any fetch
+  // even started.
   useEffect(() => {
-    if (!accessToken) {
-      queueMicrotask(() => setIsLoading(false));
-      return;
-    }
-    if (isFirstFetch.current) queueMicrotask(() => setIsLoading(true));
     let cancelled = false;
-
-    // QA — migrated from Java `/api/nodes` to the FloodWatch IoT
-    // BFF `/api/iot/zones`. Same NodeData[] shape coming out;
-    // adapted at the boundary by `zoneToNodeData`. The IoT BFF is
-    // public so no auth wrapper / token refresh dance is needed.
-    const nodesP = fetch("/api/iot/zones", { cache: "no-store" })
-      .then(async (res) => {
+    (async () => {
+      try {
+        const res = await fetch("/api/iot/zones", { cache: "no-store" });
         if (cancelled) return;
         if (!res.ok) throw new Error("Failed to fetch sensor zones");
         const zones = (await res.json()) as Zone[];
         if (!Array.isArray(zones)) throw new Error("Unexpected zones payload");
         setNodes(zones.map(zoneToNodeData));
         setLastFetch(new Date());
-        isFirstFetch.current = false;
-      })
-      .catch((error) => {
+      } catch (error) {
         console.error("Error fetching IoT zones:", error);
         if (!cancelled && isFirstFetch.current) {
           toast.error("Failed to load sensor data. Please refresh.");
         }
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+          isFirstFetch.current = false;
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
-    const analyticsP = authFetchJson<AnalyticsData>("/api/analytics", accessToken, silentRefresh)
+  // Analytics — token-gated, and intentionally independent of the
+  // sensor-zone loading state above so a slow or not-yet-ready token
+  // never blanks the sensor UI.
+  useEffect(() => {
+    if (!accessToken) return;
+    let cancelled = false;
+    authFetchJson<AnalyticsData>("/api/analytics", accessToken, silentRefresh)
       .then((d) => {
         if (!cancelled) setAnalytics(d);
       })
@@ -151,9 +160,6 @@ export default function DashboardPage() {
         console.error("Analytics fetch failed:", err);
         if (!cancelled) toast.error("Failed to load analytics data.");
       });
-
-    void Promise.all([nodesP, analyticsP]);
-
     return () => {
       cancelled = true;
     };
