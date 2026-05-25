@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { toast, Toaster } from "react-hot-toast";
 
 import { useAuth } from "@/lib/AuthContext";
-import { authFetchJson } from "@/lib/authFetch";
 import { useTheme } from "@/lib/ThemeContext";
 import { useLanguage, LANGUAGE_CHANGED_EVENT } from "@/lib/i18n/LanguageContext";
 import { LOCALE_LABELS, type TranslationKey } from "@/lib/i18n/translations";
@@ -198,7 +197,7 @@ const TAB_LABEL_KEY: Record<SettingsTab, TranslationKey> = {
 
 export default function SettingsPage() {
   const { isDark } = useTheme();
-  const { accessToken, silentRefresh } = useAuth();
+  const { silentRefresh } = useAuth();
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [settings, setSettings] = useState<CRMSettings>(defaultSettings);
@@ -207,11 +206,22 @@ export default function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    const savedSettings = localStorage.getItem("crmSettings");
-    if (savedSettings) {
-      const parsed = JSON.parse(savedSettings);
-      setSettings(parsed);
-      setOriginalSettings(parsed);
+    try {
+      const savedSettings = localStorage.getItem("crmSettings");
+      if (!savedSettings) return;
+      const parsed = JSON.parse(savedSettings) as Partial<CRMSettings>;
+      // Merge over defaults so a blob persisted before a field existed
+      // (schema evolution, e.g. `language` added later) still hydrates
+      // every control with a defined value — and an old blob can't leave
+      // a <select>/<input> uncontrolled. Two independent copies so edits
+      // to `settings` never mutate `originalSettings`.
+      const hydrated: CRMSettings = { ...defaultSettings, ...parsed };
+      setSettings({ ...hydrated });
+      setOriginalSettings({ ...hydrated });
+    } catch {
+      // Corrupt / unparseable blob — drop it and fall back to defaults
+      // (already the initial state) so the page never crashes on load.
+      try { localStorage.removeItem("crmSettings"); } catch { /* ignore */ }
     }
   }, []);
 
@@ -224,10 +234,16 @@ export default function SettingsPage() {
   };
 
   const handleSave = async () => {
+    // The Save buttons are disabled while `isSaving`, so this early guard
+    // is belt-and-braces against a programmatic / rapid double-submit.
+    if (isSaving) return;
     setIsSaving(true);
+    // Intentional ~800 ms latency so the operator gets explicit "Saving…"
+    // feedback before the success toast (a synchronous localStorage write
+    // would otherwise feel like nothing happened).
     await new Promise((resolve) => setTimeout(resolve, 800));
     localStorage.setItem("crmSettings", JSON.stringify(settings));
-    setOriginalSettings(settings);
+    setOriginalSettings({ ...settings });
     setIsSaving(false);
     // Broadcast so LanguageProvider re-reads the locale and the whole
     // UI (sidebar, top bar, footer, this page) switches language live.
@@ -236,13 +252,19 @@ export default function SettingsPage() {
   };
 
   const handleCancel = () => {
-    setSettings(originalSettings);
+    // Discard pending edits: clean-copy the last saved snapshot back into
+    // the active form so `hasChanges` recomputes to false and the form
+    // locks again.
+    setSettings({ ...originalSettings });
     toast("Changes reverted.", { icon: "↩️" });
   };
 
   const handleReset = () => {
-    setSettings(defaultSettings);
-    setOriginalSettings(defaultSettings);
+    // Hard factory reset: independent copies of the defaults into both
+    // states (never share the module-level constant), clear persistence,
+    // re-broadcast i18n so the locale snaps back live, no reload needed.
+    setSettings({ ...defaultSettings });
+    setOriginalSettings({ ...defaultSettings });
     localStorage.removeItem("crmSettings");
     window.dispatchEvent(new Event(LANGUAGE_CHANGED_EVENT));
     toast.success("Settings reset to defaults!");
@@ -269,12 +291,23 @@ export default function SettingsPage() {
     const toastId = toast.loading(`Testing ${service} connection…`);
     try {
       if (service === "Java API") {
-        if (!accessToken) {
-          toast.error("Sign in to test the Java API connection through the CRM.", { id: toastId });
-          return;
+        // Hit the BFF /api/nodes using the httpOnly auth cookie
+        // (credentials:include) — /api/nodes reads it via bffToken. On a
+        // 401/403 we silent-refresh once (rotating the cookie) and retry,
+        // so an expired access token self-heals. Decoupled from the
+        // in-memory accessToken, which is null on the cookie session and
+        // previously made this test always say "sign in".
+        const ping = () => fetch("/api/nodes", { cache: "no-store", credentials: "include" });
+        let res = await ping();
+        if (res.status === 401 || res.status === 403) {
+          await silentRefresh();
+          res = await ping();
         }
-        await authFetchJson<{ success: boolean; data?: unknown }>("/api/nodes", accessToken, silentRefresh);
-        toast.success("Java API responded successfully (BFF to backend path is working).", { id: toastId });
+        if (res.ok) {
+          toast.success("Java API responded successfully (BFF → backend path is working).", { id: toastId });
+        } else {
+          toast.error(`Java API connection failed (HTTP ${res.status}).`, { id: toastId });
+        }
         return;
       }
       const res = await fetch("/api/health", { cache: "no-store" });
@@ -317,13 +350,14 @@ export default function SettingsPage() {
         </div>
         <div className="flex items-center gap-3">
           {hasChanges && (
-            <span className="rounded-full bg-status-warning-1/20 px-3 py-1 text-xs font-semibold text-status-warning-1">
+            <span data-cy="settings-unsaved" className="rounded-full bg-status-warning-1/20 px-3 py-1 text-xs font-semibold text-status-warning-1">
               {t("settings.unsaved")}
             </span>
           )}
           <button
             type="button"
             onClick={handleExportSettings}
+            data-cy="settings-export"
             className={`rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${
               isDark
                 ? "border-dark-border text-dark-text hover:bg-dark-bg"
@@ -336,6 +370,7 @@ export default function SettingsPage() {
             type="button"
             onClick={handleSave}
             disabled={!hasChanges || isSaving}
+            data-cy="settings-save"
             className="rounded-xl bg-primary-blue px-5 py-2.5 text-sm font-semibold text-pure-white transition hover:bg-primary-blue/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isSaving ? t("settings.saving") : t("settings.save")}
@@ -408,6 +443,7 @@ export default function SettingsPage() {
                     type="text"
                     value={settings.systemName}
                     onChange={(e) => handleChange("systemName", e.target.value)}
+                    data-cy="settings-system-name"
                     className={inputClass}
                   />
                 </div>
@@ -585,6 +621,7 @@ export default function SettingsPage() {
                       type="checkbox"
                       checked={settings.liveDataEnabled}
                       onChange={(e) => handleChange("liveDataEnabled", e.target.checked)}
+                      data-cy="settings-live-mode"
                       className="h-5 w-5 rounded border-light-grey text-primary-blue focus:ring-primary-blue/40"
                     />
                   </label>
@@ -621,7 +658,7 @@ export default function SettingsPage() {
                       ];
 
                       return (
-                        <div className={`mt-2 space-y-3 ${isDisabled ? "opacity-50 pointer-events-none" : ""}`}>
+                        <div data-cy="settings-refresh-block" className={`mt-2 space-y-3 ${isDisabled ? "opacity-50 pointer-events-none" : ""}`}>
                           {/* Number input + unit label */}
                           <div className="flex items-center gap-2">
                             <input
@@ -635,6 +672,7 @@ export default function SettingsPage() {
                                 if (!isNaN(v)) handleChange("refreshInterval", v * 1000);
                               }}
                               disabled={isDisabled}
+                              data-cy="settings-refresh-input"
                               className={`${inputClass} w-32 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
                                 isInvalid ? "border-status-danger focus:ring-status-danger/20" : ""
                               }`}
@@ -768,6 +806,7 @@ export default function SettingsPage() {
                     <button
                       type="button"
                       onClick={() => handleTestConnection("Google Maps")}
+                      data-cy="settings-test-maps"
                       className={`rounded-xl border px-4 py-2 text-sm font-semibold text-primary-blue transition ${isDark ? "border-primary-blue hover:bg-primary-blue/20" : "border-primary-blue hover:bg-light-blue/20"}`}
                     >
                       Test
@@ -797,6 +836,7 @@ export default function SettingsPage() {
                     <button
                       type="button"
                       onClick={() => handleTestConnection("Java API")}
+                      data-cy="settings-test-java"
                       className={`rounded-xl border px-4 py-2 text-sm font-semibold text-primary-blue transition ${isDark ? "border-primary-blue hover:bg-primary-blue/20" : "border-primary-blue hover:bg-light-blue/20"}`}
                     >
                       Test
@@ -1141,6 +1181,7 @@ export default function SettingsPage() {
             <button
               type="button"
               onClick={handleReset}
+              data-cy="settings-reset"
               className={`rounded-xl border px-5 py-2.5 text-sm font-semibold transition ${
                 isDark
                   ? "border-dark-border text-dark-text hover:bg-dark-bg"
@@ -1153,6 +1194,7 @@ export default function SettingsPage() {
               type="button"
               onClick={handleCancel}
               disabled={!hasChanges}
+              data-cy="settings-cancel"
               className={`rounded-xl border px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                 isDark
                   ? "border-dark-border text-dark-text hover:bg-dark-bg"
@@ -1165,6 +1207,7 @@ export default function SettingsPage() {
               type="button"
               onClick={handleSave}
               disabled={!hasChanges || isSaving}
+              data-cy="settings-save-footer"
               className="rounded-xl bg-primary-blue px-5 py-2.5 text-sm font-semibold text-pure-white transition hover:bg-primary-blue/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {isSaving ? t("settings.saving") : t("settings.save")}

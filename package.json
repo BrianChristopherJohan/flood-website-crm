@@ -23,7 +23,8 @@
     "cy:run:broadcasts": "cypress run --spec 'cypress/e2e/broadcasts.cy.ts'",
     "cy:run:dashboard": "cypress run --spec 'cypress/e2e/dashboard.cy.ts'",
     "cy:run:map": "cypress run --spec 'cypress/e2e/map.cy.ts'",
-    "cy:run:sensors": "cypress run --spec 'cypress/e2e/sensors.cy.ts'"
+    "cy:run:sensors": "cypress run --spec 'cypress/e2e/sensors.cy.ts'",
+    "cy:run:settings": "cypress run --spec 'cypress/e2e/crm/settings.cy.ts'"
   },
   "dependencies": {
     "@radix-ui/react-dropdown-menu": "^2.1.16",
