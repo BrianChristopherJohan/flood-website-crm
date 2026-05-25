@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import NodeMap from "@/components/map/NodeMap";
-import SavedPlacesPanel from "@/components/map/SavedPlacesPanel";
+import SavedPlacesPanel, { type SavedPlace } from "@/components/map/SavedPlacesPanel";
 import { useTheme } from "@/lib/ThemeContext";
 import { NodeData, type FloodLevel, type Zone } from "@/lib/types";
 import type { IoTNode } from "@/lib/floodwatch/types";
@@ -195,6 +195,11 @@ export default function FloodMapPage() {
     } catch { return new Set(); }
   });
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+
+  // Saved places shared up from the panel so the map can draw radius circles,
+  // plus a right-click "add here" request relayed down to the panel's editor.
+  const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>([]);
+  const [addRequest, setAddRequest] = useState<{ lat: number; lng: number; nonce: number } | null>(null);
 
   function toggleFavourite(nodeId: string) {
     setFavouriteIds(prev => {
@@ -744,6 +749,11 @@ export default function FloodMapPage() {
                 favouriteIds={favouriteIds}
                 onToggleFavourite={toggleFavourite}
                 enableMyLocation
+                autoLocate
+                savedPlaces={savedPlaces}
+                onMapRightClick={(lat, lng) =>
+                  setAddRequest((prev) => ({ lat, lng, nonce: (prev?.nonce ?? 0) + 1 }))
+                }
               />
             </div>
 
@@ -779,6 +789,8 @@ export default function FloodMapPage() {
                 : { lat: 1.553, lng: 110.344 }
             }
             isDark={isDark}
+            onPlacesChange={setSavedPlaces}
+            addRequest={addRequest}
           />
 
           {/* All-nodes grid */}

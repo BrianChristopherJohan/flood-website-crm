@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from "react"
 
 import {
   Autocomplete,
+  Circle,
   GoogleMap,
   InfoWindow,
   Marker,
@@ -37,6 +38,12 @@ type NodeMapProps = {
   onToggleFavourite?: (nodeId: string) => void;
   /** Show the "use my location" control (geolocation → pan + blue dot). */
   enableMyLocation?: boolean;
+  /** Auto-request geolocation once on mount and pan to the user (like community). */
+  autoLocate?: boolean;
+  /** Right-click anywhere on the map → add a saved place at that coordinate. */
+  onMapRightClick?: (lat: number, lng: number) => void;
+  /** Saved places to draw as radius circles + centre markers. */
+  savedPlaces?: { id: string; label: string; latitude: number; longitude: number; radiusKm: number }[];
 };
 
 const mapStyles: google.maps.MapTypeStyle[] = [
@@ -69,6 +76,9 @@ export default function NodeMap({
   favouriteIds,
   onToggleFavourite,
   enableMyLocation = false,
+  autoLocate = false,
+  onMapRightClick,
+  savedPlaces,
 }: NodeMapProps) {
   // clickedNodeId — the node whose InfoWindow is open. The InfoWindow opens
   // ONLY on click (hover no longer opens it, per UX request); clicking the
@@ -133,6 +143,18 @@ export default function NodeMap({
       { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
     );
   }, []);
+
+  // Right-click → bubble the clicked coordinate up so the page can open the
+  // "add saved place" editor prefilled there (mirrors the community map's
+  // right-click-to-save-a-home UX). Google Maps suppresses its own context
+  // menu on the canvas, so this doesn't fight the browser menu.
+  const handleMapRightClick = useCallback(
+    (e: google.maps.MapMouseEvent) => {
+      if (!onMapRightClick || !e.latLng) return;
+      onMapRightClick(e.latLng.lat(), e.latLng.lng());
+    },
+    [onMapRightClick],
+  );
 
   const { isLoaded, loadError } = useJsApiLoader({
     id: "google-map-script",
@@ -308,6 +330,20 @@ export default function NodeMap({
     }
     didAutoFit.current = true;
   }, [nodes, mapReady, focusNodeId]);
+
+  // Auto-locate on first load: when `autoLocate` is set, request the browser
+  // location once the map is controllable and pan to the user — same
+  // behaviour as the community map. Runs once; skipped when a deep-link
+  // focusNodeId is requested. If permission is denied/unavailable the
+  // earlier auto-fit (nodes bounding box) stays as the fallback view.
+  const didAutoLocate = useRef(false);
+  useEffect(() => {
+    if (!autoLocate || didAutoLocate.current) return;
+    if (!mapReady || !mapRef.current) return;
+    didAutoLocate.current = true;
+    if (focusNodeId) return; // deep-link wins — don't yank the camera away
+    locateMe();
+  }, [autoLocate, mapReady, focusNodeId, locateMe]);
 
   // Show placeholder if no valid API key or if there's an error
   if (!hasValidApiKey || mapError || loadError) {
@@ -558,7 +594,39 @@ export default function NodeMap({
           gestureHandling: "greedy",
         }}
         onLoad={onMapLoad}
+        onRightClick={handleMapRightClick}
       >
+      {/* Saved-place radius circles + centre markers (right-click to add). */}
+      {savedPlaces?.map((pl) => (
+        <React.Fragment key={pl.id}>
+          <Circle
+            center={{ lat: pl.latitude, lng: pl.longitude }}
+            radius={pl.radiusKm * 1000}
+            options={{
+              strokeColor: "#1a73e8",
+              strokeOpacity: 0.85,
+              strokeWeight: 1.5,
+              fillColor: "#1a73e8",
+              fillOpacity: 0.08,
+              clickable: false,
+              zIndex: 1,
+            }}
+          />
+          <Marker
+            position={{ lat: pl.latitude, lng: pl.longitude }}
+            title={`${pl.label} · ${pl.radiusKm} km radius`}
+            icon={{
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 5,
+              fillColor: "#1a73e8",
+              fillOpacity: 1,
+              strokeColor: "#ffffff",
+              strokeWeight: 2,
+            }}
+            zIndex={5}
+          />
+        </React.Fragment>
+      ))}
       {nodes.map((node) => {
         const isHighlighted = highlightedIds?.has(node._id) || latestUpdatedNode?._id === node._id;
         const color = getMarkerColor(node);

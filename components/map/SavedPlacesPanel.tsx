@@ -43,6 +43,12 @@ interface SavedPlacesPanelProps {
   defaultCentre?: { lat: number; lng: number } | null;
   /** Dark mode flag for surface colours. */
   isDark?: boolean;
+  /** Notified whenever the saved-places list changes (load/add/edit/delete)
+   *  so the map can draw the radius circles. Pass a stable setter. */
+  onPlacesChange?: (places: SavedPlace[]) => void;
+  /** When `nonce` changes, open the editor prefilled at this coordinate —
+   *  driven by a right-click on the map. */
+  addRequest?: { lat: number; lng: number; nonce: number } | null;
 }
 
 const STORAGE_KEY = "crm:saved-places:v1";
@@ -158,6 +164,8 @@ export default function SavedPlacesPanel({
   onFocusPlace,
   defaultCentre,
   isDark = false,
+  onPlacesChange,
+  addRequest,
 }: SavedPlacesPanelProps) {
   const [places, setPlaces] = useState<SavedPlace[]>([]);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -172,6 +180,12 @@ export default function SavedPlacesPanel({
   useEffect(() => {
     setPlaces(loadSaved());
   }, []);
+
+  // Surface the list to the parent (map) so it can draw radius circles.
+  // `onPlacesChange` must be a stable reference (e.g. a useState setter).
+  useEffect(() => {
+    onPlacesChange?.(places);
+  }, [places, onPlacesChange]);
 
   const totals = useMemo(
     () => places.map((p) =>
@@ -241,6 +255,41 @@ export default function SavedPlacesPanel({
     setDraftRadius(3);
     setEditorOpen(true);
   }, [defaultCentre]);
+
+  // Open the editor prefilled at a specific coordinate (right-click flow).
+  // Also kicks off a reverse-geocode to suggest a friendly label, which the
+  // operator can keep or overwrite.
+  const openAddAt = useCallback((lat: number, lng: number) => {
+    setEditing(null);
+    setDraftLabel("");
+    setDraftLat(lat.toFixed(6));
+    setDraftLng(lng.toFixed(6));
+    setDraftRadius(3);
+    setEditorOpen(true);
+    if (typeof google !== "undefined" && google.maps?.Geocoder) {
+      try {
+        new google.maps.Geocoder().geocode(
+          { location: { lat, lng } },
+          (results, status) => {
+            if (status === "OK" && results && results[0]) {
+              // Use the most specific name (first address component line).
+              setDraftLabel((cur) => cur || results[0].formatted_address.split(",")[0]);
+            }
+          },
+        );
+      } catch {
+        /* geocoder unavailable — operator types the label */
+      }
+    }
+  }, []);
+
+  // Right-click on the map (via `addRequest` nonce) → open prefilled editor.
+  const lastAddNonce = useRef(0);
+  useEffect(() => {
+    if (!addRequest || addRequest.nonce === lastAddNonce.current) return;
+    lastAddNonce.current = addRequest.nonce;
+    openAddAt(addRequest.lat, addRequest.lng);
+  }, [addRequest, openAddAt]);
 
   const openEdit = useCallback((p: SavedPlace) => {
     setEditing(p);
@@ -318,6 +367,7 @@ export default function SavedPlacesPanel({
           <h2 className={`text-base font-semibold ${body}`}>My Saved Places</h2>
           <p className={`text-xs ${muted}`}>
             Bookmark high-risk areas — we'll count nearby sensors so you can monitor coverage.
+            <span className="block">Tip: right-click anywhere on the map to drop a place.</span>
           </p>
         </div>
         <button
