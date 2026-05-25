@@ -13,7 +13,27 @@ import toast from "react-hot-toast";
 import { useAuth } from "@/lib/AuthContext";
 import { usePermissions } from "@/lib/hooks/usePermissions";
 import { useTheme } from "@/lib/ThemeContext";
-import { authFetch, authFetchJson } from "@/lib/authFetch";
+
+// Call a same-origin BFF route using the httpOnly auth cookie. On 401/403
+// the access cookie may have expired — silentRefresh() rotates it then we
+// retry. Decoupled from the in-memory accessToken, which is null on the
+// cookie-based session (SSO handoff / fresh login). Previously the panel
+// gated load() behind that token, so it returned before fetching and the
+// table stayed stuck on "Loading…" with no comments ever pulled.
+async function cookieFetch(
+  url: string,
+  silentRefresh: () => Promise<string | null>,
+  options: RequestInit = {},
+): Promise<Response> {
+  const doFetch = () =>
+    fetch(url, { ...options, cache: "no-store", credentials: "include" });
+  let res = await doFetch();
+  if (res.status === 401 || res.status === 403) {
+    await silentRefresh();
+    res = await doFetch();
+  }
+  return res;
+}
 
 const COMMUNITY_SITE =
   typeof process !== "undefined" && process.env.NEXT_PUBLIC_COMMUNITY_URL
@@ -56,7 +76,7 @@ function timeAgo(iso: string) {
 export default function CommentsModerationPanel() {
   const { isDark } = useTheme();
   const { can } = usePermissions();
-  const { accessToken, silentRefresh } = useAuth();
+  const { silentRefresh } = useAuth();
   const allowed = can("community.comments.moderate");
 
   const [rows, setRows] = useState<AdminCommentRow[]>([]);
@@ -69,12 +89,14 @@ export default function CommentsModerationPanel() {
 
   const load = useCallback(
     async (p: number) => {
-      if (!accessToken || !allowed) return;
+      if (!allowed) {
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       try {
-        const res = await authFetch(
+        const res = await cookieFetch(
           `/api/community/comments?page=${p}&size=20`,
-          accessToken,
           silentRefresh,
         );
         if (!res.ok) {
@@ -92,7 +114,7 @@ export default function CommentsModerationPanel() {
         setLoading(false);
       }
     },
-    [accessToken, silentRefresh, allowed],
+    [silentRefresh, allowed],
   );
 
   useEffect(() => {
@@ -111,19 +133,23 @@ export default function CommentsModerationPanel() {
   }, [rows, filter]);
 
   async function moderate(id: string, action: "hide" | "restore" | "delete") {
-    if (!accessToken) return;
     setBusyId(id);
     try {
-      await authFetchJson<unknown>(
-        `/api/community/comments/${id}`,
-        accessToken,
-        silentRefresh,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action }),
-        },
-      );
+      const res = await cookieFetch(`/api/community/comments/${id}`, silentRefresh, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (!res.ok) {
+        let message = "Action failed";
+        try {
+          const body = (await res.json()) as { error?: string; message?: string };
+          message = body?.error ?? body?.message ?? message;
+        } catch {
+          /* keep generic */
+        }
+        throw new Error(message);
+      }
       toast.success(
         action === "hide" ? "Comment hidden" : action === "restore" ? "Restored" : "Removed",
       );

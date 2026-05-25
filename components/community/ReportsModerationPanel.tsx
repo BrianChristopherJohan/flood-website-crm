@@ -20,7 +20,38 @@ import Link from "next/link";
 import toast from "react-hot-toast";
 import { useTheme } from "@/lib/ThemeContext";
 import { useAuth } from "@/lib/AuthContext";
-import { authFetchJson } from "@/lib/authFetch";
+
+// Call a same-origin BFF route using the httpOnly auth cookie, retrying
+// once via silentRefresh() on 401/403. Decoupled from the in-memory
+// accessToken (null on the cookie-based session), which previously gated
+// fetchReports() shut so the Reports tab stayed stuck on "Loading…".
+async function cookieFetchJson<T>(
+  url: string,
+  silentRefresh: () => Promise<string | null>,
+  options: RequestInit = {},
+): Promise<T> {
+  const doFetch = () =>
+    fetch(url, { ...options, cache: "no-store", credentials: "include" });
+  let res = await doFetch();
+  if (res.status === 401 || res.status === 403) {
+    await silentRefresh();
+    res = await doFetch();
+  }
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = (await res.json()) as { error?: string; message?: string };
+      message = body?.error ?? body?.message ?? message;
+    } catch {
+      /* keep generic */
+    }
+    throw new Error(message);
+  }
+  if (res.status === 204) return undefined as T;
+  const ct = res.headers.get("content-type") ?? "";
+  if (!ct.includes("application/json")) return undefined as T;
+  return res.json() as Promise<T>;
+}
 
 type ContentReport = {
   id: string;
@@ -77,18 +108,16 @@ type Props = {
 
 export default function ReportsModerationPanel({ onPendingCountChange }: Props) {
   const { isDark } = useTheme();
-  const { accessToken, silentRefresh } = useAuth();
+  const { silentRefresh } = useAuth();
   const [items, setItems] = useState<ContentReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const fetchReports = useCallback(async () => {
-    if (!accessToken) return;
     setLoading(true);
     try {
-      const data = await authFetchJson<Page<ContentReport>>(
+      const data = await cookieFetchJson<Page<ContentReport>>(
         "/api/community/content-reports?page=0&size=50",
-        accessToken,
         silentRefresh,
       );
       const list = data.content ?? [];
@@ -99,19 +128,17 @@ export default function ReportsModerationPanel({ onPendingCountChange }: Props) 
     } finally {
       setLoading(false);
     }
-  }, [accessToken, silentRefresh, onPendingCountChange]);
+  }, [silentRefresh, onPendingCountChange]);
 
   useEffect(() => {
     void fetchReports();
   }, [fetchReports]);
 
   async function setStatus(id: string, status: string) {
-    if (!accessToken) return;
     setBusyId(id);
     try {
-      const updated = await authFetchJson<ContentReport>(
+      const updated = await cookieFetchJson<ContentReport>(
         `/api/community/content-reports/${id}`,
-        accessToken,
         silentRefresh,
         {
           method: "PATCH",
@@ -133,21 +160,18 @@ export default function ReportsModerationPanel({ onPendingCountChange }: Props) 
   }
 
   async function deleteContentAndAction(report: ContentReport) {
-    if (!accessToken) return;
     if (!confirm(`Permanently remove this ${report.targetType.toLowerCase()}?`)) return;
     setBusyId(report.id);
     try {
       if (report.targetType === "POST") {
-        await authFetchJson(
+        await cookieFetchJson(
           `/api/community/admin/posts/${report.targetId}`,
-          accessToken,
           silentRefresh,
           { method: "DELETE" },
         );
       } else if (report.targetType === "COMMENT") {
-        await authFetchJson(
+        await cookieFetchJson(
           `/api/community/comments/${report.targetId}`,
-          accessToken,
           silentRefresh,
           {
             method: "PATCH",
@@ -156,9 +180,8 @@ export default function ReportsModerationPanel({ onPendingCountChange }: Props) 
           },
         );
       }
-      const updated = await authFetchJson<ContentReport>(
+      const updated = await cookieFetchJson<ContentReport>(
         `/api/community/content-reports/${report.id}`,
-        accessToken,
         silentRefresh,
         {
           method: "PATCH",
