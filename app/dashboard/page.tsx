@@ -171,9 +171,10 @@ export default function DashboardPage() {
   // Replaces the old hardcoded "national baseline" state chart with genuine
   // telemetry. Public endpoint — no auth needed.
   const [iotSummary, setIotSummary] = useState<IoTStatsSummary | null>(null);
-  // Battery health across the live sensor network (full per-node feed —
-  // the zones feed above strips raw telemetry). Additive: feeds one KPI card.
-  const [batteryStats, setBatteryStats] = useState<{ attention: number; total: number } | null>(null);
+  // Full per-node feed (the zones feed used for the map strips raw telemetry).
+  // We keep it to (a) merge battery_voltage into the table + map popup by
+  // node_id and (b) drive the "Battery Health" KPI card.
+  const [iotNodes, setIotNodes] = useState<IoTNode[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const isFirstFetch = useRef(true);
@@ -254,25 +255,19 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // Battery health — full per-node feed (dataset=all). Additive; powers the
-  // "Battery Health" KPI card without touching the zone-based map/stats.
+  // Full per-node feed for battery telemetry. Matches the zones' default
+  // dataset (env) so node_id merge keys line up with the map/table set.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/iot/nodes?dataset=all", { cache: "no-store" });
+        const search = typeof window !== "undefined" ? window.location.search : "";
+        const dsMatch = search.match(/[?&]dataset=([^&]+)/);
+        const qs = dsMatch ? `?dataset=${encodeURIComponent(dsMatch[1])}` : "";
+        const res = await fetch(`/api/iot/nodes${qs}`, { cache: "no-store" });
         if (cancelled || !res.ok) return;
         const list = (await res.json()) as IoTNode[];
-        if (!Array.isArray(list)) return;
-        let attention = 0;
-        let total = 0;
-        for (const n of list) {
-          const sev = getBatteryStatus(n.battery_voltage).severity;
-          if (sev === "unknown") continue;
-          total += 1;
-          if (sev === "low" || sev === "critical" || sev === "dead") attention += 1;
-        }
-        if (!cancelled) setBatteryStats({ attention, total });
+        if (!cancelled && Array.isArray(list)) setIotNodes(list);
       } catch (error) {
         console.warn("[dashboard] battery fetch failed:", error);
       }
@@ -379,6 +374,41 @@ export default function DashboardPage() {
       riskiestNode,
     };
   }, [nodes]);
+
+  // ── Battery telemetry, merged into the zone-derived node set by node_id ────
+  // The map/table run on the privacy-aware zones feed (good coordinate
+  // resolution); we layer battery_voltage on top from the full node feed so
+  // the table column + map InfoWindow show it without changing the node set.
+  const batteryByNodeId = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const n of iotNodes ?? []) {
+      if (typeof n.battery_voltage === "number") map[n.node_id] = n.battery_voltage;
+    }
+    return map;
+  }, [iotNodes]);
+
+  const batteryStats = useMemo(() => {
+    if (!iotNodes) return null;
+    let attention = 0;
+    let total = 0;
+    for (const n of iotNodes) {
+      const sev = getBatteryStatus(n.battery_voltage).severity;
+      if (sev === "unknown") continue;
+      total += 1;
+      if (sev === "low" || sev === "critical" || sev === "dead") attention += 1;
+    }
+    return { attention, total };
+  }, [iotNodes]);
+
+  const nodesWithBattery = useMemo(
+    () =>
+      nodes.map((n) =>
+        batteryByNodeId[n.node_id] !== undefined
+          ? { ...n, battery_voltage: batteryByNodeId[n.node_id] }
+          : n,
+      ),
+    [nodes, batteryByNodeId],
+  );
 
   // Bar chart data — the 10 highest-reading nodes, sorted worst-first so the
   // chart leads with the sensors that need attention (ordered bars are easier
@@ -787,6 +817,7 @@ export default function DashboardPage() {
                   <tr>
                     <th className="px-4 py-3 font-semibold">Node ID</th>
                     <th className="px-4 py-3 font-semibold">Water Level</th>
+                    <th className="px-4 py-3 font-semibold">Battery</th>
                     <th className="px-4 py-3 font-semibold">Coordinates</th>
                     <th className="px-4 py-3 font-semibold">Status</th>
                     <th className="px-4 py-3 font-semibold">Node Status</th>
@@ -794,14 +825,14 @@ export default function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {nodes.length === 0 && (
+                  {nodesWithBattery.length === 0 && (
                     <tr>
-                      <td colSpan={6} className={`py-10 text-center text-sm ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
+                      <td colSpan={7} className={`py-10 text-center text-sm ${isDark ? "text-dark-text-muted" : "text-dark-charcoal/60"}`}>
                         No sensor nodes configured yet
                       </td>
                     </tr>
                   )}
-                  {nodes.map((node) => (
+                  {nodesWithBattery.map((node) => (
                     <tr
                       key={node._id}
                       className={`border-b last:border-b-0 transition-colors ${
@@ -819,6 +850,23 @@ export default function DashboardPage() {
                       </td>
                       <td className="px-4 py-3 text-primary-blue font-bold">
                         {node.current_level} ft
+                      </td>
+                      <td className="px-4 py-3">
+                        {(() => {
+                          const b = getBatteryStatus(node.battery_voltage);
+                          return (
+                            <span
+                              className="inline-flex items-center gap-1.5 text-xs font-semibold"
+                              title={b.pct !== null ? `${b.pct}% · ${b.label}` : b.label}
+                              style={{ color: b.hex }}
+                            >
+                              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: b.hex }} />
+                              {typeof node.battery_voltage === "number"
+                                ? `${node.battery_voltage.toFixed(2)} V`
+                                : "—"}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="px-4 py-3 text-xs">
                         {node.latitude.toFixed(4)}°N, {node.longitude.toFixed(4)}°E
@@ -919,7 +967,7 @@ export default function DashboardPage() {
                 </span>
               </div>
             ) : (
-              <NodeMap nodes={nodes} height={280} zoom={12} />
+              <NodeMap nodes={nodesWithBattery} height={280} zoom={12} />
             )}
           </div>
           <ul
