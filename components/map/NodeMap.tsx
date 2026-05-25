@@ -67,12 +67,11 @@ export default function NodeMap({
   favouriteIds,
   onToggleFavourite,
 }: NodeMapProps) {
-  // hoveredNodeId  — transient, cleared when mouse leaves
-  // clickedNodeId  — persistent, survives mouse-leave so user can interact with InfoWindow
-  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  // clickedNodeId — the node whose InfoWindow is open. The InfoWindow opens
+  // ONLY on click (hover no longer opens it, per UX request); clicking the
+  // same pin again toggles it closed.
   const [clickedNodeId, setClickedNodeId] = useState<string | null>(null);
-  // Derived: clicked takes priority over hovered
-  const activeNodeId = clickedNodeId ?? hoveredNodeId;
+  const activeNodeId = clickedNodeId;
   const [mapError, setMapError] = useState(false);
   const [lastFocusedNodeId, setLastFocusedNodeId] = useState<string | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
@@ -502,8 +501,6 @@ export default function NodeMap({
             position={{ lat: node.latitude, lng: node.longitude }}
             icon={pinIcon}
             zIndex={isHighlighted ? 10 : 1}
-            onMouseOver={() => setHoveredNodeId(node._id)}
-            onMouseOut={() => setHoveredNodeId(null)}
             onClick={() =>
               setClickedNodeId((prev) => (prev === node._id ? null : node._id))
             }
@@ -513,7 +510,7 @@ export default function NodeMap({
       {activeNode && (
         <InfoWindow
           position={{ lat: activeNode.latitude, lng: activeNode.longitude }}
-          onCloseClick={() => { setClickedNodeId(null); setHoveredNodeId(null); }}
+          onCloseClick={() => setClickedNodeId(null)}
           options={{
             // Anchor the InfoWindow above the pin's head (~30 px up from
             // the tip, which is at the node lat/lng). Was -34 for the
