@@ -174,16 +174,6 @@ function statusLabel(node: NodeData) {
   return ["Normal", "Alert", "Warning", "Critical"][node.current_level] ?? "Unknown";
 }
 
-function formatTimeAgo(date: Date): string {
-  const secs = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (secs < 60) return `${secs}s ago`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
 // ── component ─────────────────────────────────────────────────────────────────
 
 export default function FloodMapPage() {
@@ -308,18 +298,6 @@ export default function FloodMapPage() {
   const favouriteNodes = useMemo(
     () => filteredNodes.filter(n => favouriteIds.has(n._id)),
     [filteredNodes, favouriteIds],
-  );
-
-  const recentlyUpdated = useMemo(() =>
-    [...nodes]
-      .sort((a, b) => new Date(b.last_updated).getTime() - new Date(a.last_updated).getTime())
-      .slice(0, 5),
-    [nodes],
-  );
-
-  const recentlyUpdatedIds = useMemo(
-    () => new Set(recentlyUpdated.map(n => n._id)),
-    [recentlyUpdated],
   );
 
   // ── stats (always from filteredNodes) ─────────────────────────────────────
@@ -757,41 +735,12 @@ export default function FloodMapPage() {
               </div>
             </div>
 
-            {/* Recently updated chip bar */}
-            {recentlyUpdated.length > 0 && (
-              <div className="mt-4">
-                <p className={`mb-2 text-[11px] font-semibold uppercase tracking-wide ${muted}`}>
-                  Recently Updated
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {recentlyUpdated.map((node, i) => (
-                    <button key={node._id} type="button" onClick={() => focusNode(node._id)}
-                      title={`Jump to ${node.node_id}${node.location ? ` · ${node.location}` : ""}`}
-                      className={`group flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
-                        isDark ? "border-dark-border bg-dark-bg hover:border-amber-400/60 hover:bg-amber-400/10 text-dark-text"
-                               : "border-light-grey bg-very-light-grey hover:border-amber-400 hover:bg-amber-50 text-dark-charcoal"}`}>
-                      <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ${
-                        i === 0 ? "bg-amber-400 text-dark-charcoal"
-                                : isDark ? "bg-dark-border text-dark-text-muted" : "bg-light-grey text-dark-charcoal/60"}`}>
-                        {i + 1}
-                      </span>
-                      <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${statusDotClass(node)}`} />
-                      <span>{node.node_id}</span>
-                      {node.area && <span className={muted}>· {node.area}</span>}
-                      <span className={`text-[10px] ${muted}`}>{formatTimeAgo(new Date(node.last_updated))}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             <div className={`mt-4 rounded-3xl border ${isDark ? "border-dark-border" : "border-light-grey"}`}>
               <NodeMap
                 nodes={filteredNodes}
                 height={460}
                 zoom={12}
                 focusNodeId={focusNodeId}
-                highlightedIds={recentlyUpdatedIds}
                 favouriteIds={favouriteIds}
                 onToggleFavourite={toggleFavourite}
               />
