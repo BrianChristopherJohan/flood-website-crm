@@ -6,6 +6,8 @@ import { toast, Toaster } from "react-hot-toast";
 import { useAuth } from "@/lib/AuthContext";
 import { authFetchJson } from "@/lib/authFetch";
 import { useTheme } from "@/lib/ThemeContext";
+import { useLanguage, LANGUAGE_CHANGED_EVENT } from "@/lib/i18n/LanguageContext";
+import { LOCALE_LABELS, type TranslationKey } from "@/lib/i18n/translations";
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -182,9 +184,22 @@ const tabs: { id: SettingsTab; label: string; icon: React.ComponentType<React.SV
   { id: "backup", label: "Backup & Restore", icon: BackupIcon },
 ];
 
+// Tab id → translation key (label falls back to English via t()).
+const TAB_LABEL_KEY: Record<SettingsTab, TranslationKey> = {
+  general: "settings.tab.general",
+  notifications: "settings.tab.notifications",
+  data: "settings.tab.data",
+  integrations: "settings.tab.integrations",
+  security: "settings.tab.security",
+  appearance: "settings.tab.appearance",
+  map: "settings.tab.map",
+  backup: "settings.tab.backup",
+};
+
 export default function SettingsPage() {
   const { isDark } = useTheme();
   const { accessToken, silentRefresh } = useAuth();
+  const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [settings, setSettings] = useState<CRMSettings>(defaultSettings);
   const [originalSettings, setOriginalSettings] = useState<CRMSettings>(defaultSettings);
@@ -214,6 +229,9 @@ export default function SettingsPage() {
     localStorage.setItem("crmSettings", JSON.stringify(settings));
     setOriginalSettings(settings);
     setIsSaving(false);
+    // Broadcast so LanguageProvider re-reads the locale and the whole
+    // UI (sidebar, top bar, footer, this page) switches language live.
+    window.dispatchEvent(new Event(LANGUAGE_CHANGED_EVENT));
     toast.success("Settings saved successfully!");
   };
 
@@ -226,6 +244,7 @@ export default function SettingsPage() {
     setSettings(defaultSettings);
     setOriginalSettings(defaultSettings);
     localStorage.removeItem("crmSettings");
+    window.dispatchEvent(new Event(LANGUAGE_CHANGED_EVENT));
     toast.success("Settings reset to defaults!");
   };
 
@@ -272,7 +291,7 @@ export default function SettingsPage() {
     }
   };
 
-  const ActiveIcon = tabs.find((t) => t.id === activeTab)?.icon || GeneralIcon;
+  const ActiveIcon = tabs.find((tab) => tab.id === activeTab)?.icon || GeneralIcon;
 
   // Common input class based on theme
   const inputClass = `mt-1 w-full rounded-xl border px-4 py-2.5 text-sm outline-none transition-colors focus:border-primary-blue focus:ring-2 focus:ring-primary-blue/20 ${
@@ -291,15 +310,15 @@ export default function SettingsPage() {
 
       <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className={`text-3xl font-semibold transition-colors ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>CRM Settings</h1>
+          <h1 className={`text-3xl font-semibold transition-colors ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>{t("nav.settings")}</h1>
           <p className={`text-sm transition-colors ${isDark ? "text-dark-text-secondary" : "text-dark-charcoal/70"}`}>
-            Configure system preferences, integrations, and security options.
+            {t("settings.subtitle")}
           </p>
         </div>
         <div className="flex items-center gap-3">
           {hasChanges && (
             <span className="rounded-full bg-status-warning-1/20 px-3 py-1 text-xs font-semibold text-status-warning-1">
-              Unsaved changes
+              {t("settings.unsaved")}
             </span>
           )}
           <button
@@ -311,7 +330,7 @@ export default function SettingsPage() {
                 : "border-light-grey text-dark-charcoal hover:bg-very-light-grey"
             }`}
           >
-            Export
+            {t("settings.export")}
           </button>
           <button
             type="button"
@@ -319,7 +338,7 @@ export default function SettingsPage() {
             disabled={!hasChanges || isSaving}
             className="rounded-xl bg-primary-blue px-5 py-2.5 text-sm font-semibold text-pure-white transition hover:bg-primary-blue/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isSaving ? "Saving..." : "Save Changes"}
+            {isSaving ? t("settings.saving") : t("settings.save")}
           </button>
         </div>
       </header>
@@ -348,7 +367,7 @@ export default function SettingsPage() {
                 }`}
               >
                 <Icon className="h-5 w-5" />
-                {tab.label}
+                {t(TAB_LABEL_KEY[tab.id])}
               </button>
             );
           })}
@@ -364,10 +383,10 @@ export default function SettingsPage() {
             </div>
             <div>
               <h2 className={`text-lg font-semibold transition-colors ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>
-                {tabs.find((t) => t.id === activeTab)?.label}
+                {t(TAB_LABEL_KEY[activeTab])}
               </h2>
               <p className={subLabelClass}>
-                {activeTab === "general" && "Basic system configuration"}
+                {activeTab === "general" && t("settings.general.desc")}
                 {activeTab === "notifications" && "Alert and notification preferences"}
                 {activeTab === "data" && "Data retention and export settings"}
                 {activeTab === "integrations" && "Third-party service connections"}
@@ -384,7 +403,7 @@ export default function SettingsPage() {
             <div className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className={labelClass}>System Name</label>
+                  <label className={labelClass}>{t("settings.field.systemName")}</label>
                   <input
                     type="text"
                     value={settings.systemName}
@@ -393,7 +412,7 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>Organization Name</label>
+                  <label className={labelClass}>{t("settings.field.organizationName")}</label>
                   <input
                     type="text"
                     value={settings.organizationName}
@@ -402,7 +421,7 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>Timezone</label>
+                  <label className={labelClass}>{t("settings.field.timezone")}</label>
                   <select
                     value={settings.timezone}
                     onChange={(e) => handleChange("timezone", e.target.value)}
@@ -415,20 +434,21 @@ export default function SettingsPage() {
                   </select>
                 </div>
                 <div>
-                  <label className={labelClass}>Language</label>
+                  <label className={labelClass}>{t("settings.field.language")}</label>
                   <select
                     value={settings.language}
                     onChange={(e) => handleChange("language", e.target.value)}
                     className={inputClass}
                   >
-                    <option value="en-MY">English (Malaysia)</option>
-                    <option value="ms-MY">Bahasa Melayu</option>
-                    <option value="zh-CN">中文 (简体)</option>
-                    <option value="ta-IN">தமிழ்</option>
+                    {Object.entries(LOCALE_LABELS).map(([code, label]) => (
+                      <option key={code} value={code}>
+                        {label}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>
-                  <label className={labelClass}>Date Format</label>
+                  <label className={labelClass}>{t("settings.field.dateFormat")}</label>
                   <select
                     value={settings.dateFormat}
                     onChange={(e) => handleChange("dateFormat", e.target.value)}
@@ -1127,7 +1147,7 @@ export default function SettingsPage() {
                   : "border-light-grey text-dark-charcoal hover:bg-very-light-grey"
               }`}
             >
-              Reset to Defaults
+              {t("settings.reset")}
             </button>
             <button
               type="button"
@@ -1139,7 +1159,7 @@ export default function SettingsPage() {
                   : "border-light-grey text-dark-charcoal hover:bg-very-light-grey"
               }`}
             >
-              Cancel
+              {t("settings.cancel")}
             </button>
             <button
               type="button"
@@ -1147,7 +1167,7 @@ export default function SettingsPage() {
               disabled={!hasChanges || isSaving}
               className="rounded-xl bg-primary-blue px-5 py-2.5 text-sm font-semibold text-pure-white transition hover:bg-primary-blue/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isSaving ? "Saving..." : "Save Changes"}
+              {isSaving ? t("settings.saving") : t("settings.save")}
             </button>
           </div>
         </article>

@@ -6,6 +6,8 @@ import Link from "next/link";
 import logo from "@/public/images/logo.png";
 import { usePermissions } from "@/lib/hooks/usePermissions";
 import type { Permission } from "@/lib/permissions";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
+import type { TranslationKey } from "@/lib/i18n/translations";
 
 type FooterLink = {
   label: string;
@@ -14,9 +16,9 @@ type FooterLink = {
   permission?: Permission;
 };
 
-const navigationSections: { title: string; links: FooterLink[] }[] = [
+const navigationSections: { titleKey: TranslationKey; links: FooterLink[] }[] = [
   {
-    title: "Main",
+    titleKey: "footer.main",
     links: [
       { label: "Dashboard", href: "/dashboard", permission: "dashboard.view" },
       { label: "Sensors", href: "/sensors", permission: "sensors.view" },
@@ -24,7 +26,7 @@ const navigationSections: { title: string; links: FooterLink[] }[] = [
     ],
   },
   {
-    title: "Insights",
+    titleKey: "footer.insights",
     links: [
       { label: "Analytics", href: "/analytics", permission: "analytics.view" },
       { label: "Alerts", href: "/alerts", permission: "alerts.view" },
@@ -32,13 +34,25 @@ const navigationSections: { title: string; links: FooterLink[] }[] = [
     ],
   },
   {
-    title: "Management",
+    titleKey: "nav.management",
     links: [
       { label: "Role Management", href: "/roles", permission: "roles.manage" },
       { label: "Account Settings", href: "/admin" },
     ],
   },
 ];
+
+// Footer link href → translation key (falls back to the English label).
+const FOOTER_LINK_KEY: Record<string, TranslationKey> = {
+  "/dashboard": "nav.dashboard",
+  "/sensors": "nav.sensors",
+  "/map": "nav.map",
+  "/analytics": "nav.analytics",
+  "/alerts": "nav.alerts",
+  "/blog": "nav.news",
+  "/roles": "nav.roles",
+  "/admin": "nav.account",
+};
 
 const socialLinks = [
   {
@@ -72,6 +86,7 @@ const socialLinks = [
 
 export default function Footer() {
   const { can } = usePermissions();
+  const { t } = useLanguage();
 
   const visibleSections = navigationSections
     .map((section) => ({
@@ -132,21 +147,24 @@ export default function Footer() {
 
           {/* Navigation Links */}
           {visibleSections.map((section) => (
-            <div key={section.title}>
+            <div key={section.titleKey}>
               <h3 className="text-xs font-bold uppercase tracking-wider text-pure-white/50">
-                {section.title}
+                {t(section.titleKey)}
               </h3>
               <ul className="mt-4 space-y-3">
-                {section.links.map((link) => (
-                  <li key={link.href}>
-                    <Link
-                      href={link.href}
-                      className="text-sm font-medium text-pure-white/90 transition hover:text-pure-white hover:underline"
-                    >
-                      {link.label}
-                    </Link>
-                  </li>
-                ))}
+                {section.links.map((link) => {
+                  const linkKey = FOOTER_LINK_KEY[link.href];
+                  return (
+                    <li key={link.href}>
+                      <Link
+                        href={link.href}
+                        className="text-sm font-medium text-pure-white/90 transition hover:text-pure-white hover:underline"
+                      >
+                        {linkKey ? t(linkKey) : link.label}
+                      </Link>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           ))}

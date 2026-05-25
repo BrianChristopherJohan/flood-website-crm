@@ -6,6 +6,7 @@ import "./globals.css";
 import AppShellWrapper from "@/components/layout/AppShellWrapper";
 import { ThemeProvider } from "@/lib/ThemeContext";
 import { AuthProvider } from "@/lib/AuthContext";
+import { LanguageProvider } from "@/lib/i18n/LanguageContext";
 import { IoTEventProvider } from "@/components/providers/IoTEventProvider";
 import { Toaster } from "react-hot-toast";
 import { getThemeInitScript } from "@/lib/theme/themeScript";
@@ -68,18 +69,20 @@ export default async function RootLayout({
         */}
 
         <ThemeProvider>
-          <AuthProvider>
-            <IoTEventProvider>
-              <AppShellWrapper>{children}</AppShellWrapper>
-              <Toaster
-                position="top-right"
-                toastOptions={{
-                  duration: 4000,
-                  style: { borderRadius: "10px", fontSize: "14px" },
-                }}
-              />
-            </IoTEventProvider>
-          </AuthProvider>
+          <LanguageProvider>
+            <AuthProvider>
+              <IoTEventProvider>
+                <AppShellWrapper>{children}</AppShellWrapper>
+                <Toaster
+                  position="top-right"
+                  toastOptions={{
+                    duration: 4000,
+                    style: { borderRadius: "10px", fontSize: "14px" },
+                  }}
+                />
+              </IoTEventProvider>
+            </AuthProvider>
+          </LanguageProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -9,6 +9,7 @@ import logo from "@/public/images/logo.png";
 import { ThemeToggle } from "@/lib/theme/ThemeToggle";
 import { useTheme } from "@/lib/ThemeContext";
 import { useAuth } from "@/lib/AuthContext";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
 import NotificationBell from "@/components/NotificationBell";
 
 import SearchModal from "./SearchModal";
@@ -122,6 +123,7 @@ export default function TopBar({
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { isDark } = useTheme();
   const { user, logout } = useAuth();
+  const { t } = useLanguage();
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -215,7 +217,7 @@ export default function TopBar({
                   Flood Management
                 </p>
                 <p className="text-xs uppercase tracking-wide text-primary-blue dark:text-[var(--color-brand-soft)]">
-                  IoT Command Center
+                  {t("topbar.subtitle")}
                 </p>
               </div>
             </div>
@@ -232,7 +234,7 @@ export default function TopBar({
             }`}
           >
             <SearchIcon className="h-5 w-5 shrink-0" />
-            <span className="hidden sm:inline flex-1 text-left truncate min-w-0">Search pages...</span>
+            <span className="hidden sm:inline flex-1 text-left truncate min-w-0">{t("topbar.search")}</span>
             <kbd
               className={`hidden lg:inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-medium shrink-0 ${
                 isDark
@@ -346,7 +348,7 @@ export default function TopBar({
                       }`}
                     >
                       <ProfileIcon className="h-4 w-4" />
-                      Account Settings
+                      {t("nav.account")}
                     </Link>
                     <button
                       type="button"
@@ -356,7 +358,7 @@ export default function TopBar({
                       }`}
                     >
                       <LogoutIcon className="h-4 w-4" />
-                      Logout
+                      {t("topbar.logout")}
                     </button>
                   </div>
                 </div>
