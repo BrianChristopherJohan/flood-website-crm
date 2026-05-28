@@ -19,7 +19,11 @@ test.describe('Dashboard Page', () => {
   test('should display map component', async ({ page }) => {
     // Map section heading is always present; the actual map canvas may not
     // load in headless browsers without a valid Google Maps key
-    await expect(page.getByText(/Hotspot Map/i).first()).toBeVisible({ timeout: 15000 });
+    // The dashboard's embedded map section is titled "Flood Map" (it mirrors
+    // the dedicated /map page). The map canvas itself may not render in
+    // headless Chromium without a valid Google Maps key, so we only check
+    // the section heading is present.
+    await expect(page.getByText(/Flood Map/i).first()).toBeVisible({ timeout: 15000 });
   });
 
   test('should show live data indicator', async ({ page }) => {
