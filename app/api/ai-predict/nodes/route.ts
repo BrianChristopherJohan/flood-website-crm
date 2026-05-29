@@ -1,3 +1,16 @@
+// GET /api/ai-predict/nodes?dataset=&scenario=&timestamp=&village_id=&status=
+//
+// Batch flood-risk prediction for live IoT nodes under a weather scenario.
+// Pipeline: pull the current node list from the FloodWatch IoT API
+// (`floodwatchFetch`), then POST it to the `flood-ai-prediction` service's
+// `/api/v1/predict/nodes` endpoint with the chosen scenario + simulation
+// timestamp. The dashboard's AI mode renders the returned per-node
+// predictions (predicted_level / probability / risk_label).
+//
+// Errors surface real status codes here (502/503) — unlike the GET
+// /api/ai-predict overlay route — because the dashboard's AI-nodes panel
+// has its own explicit "AI offline / retry" UX keyed on a failed fetch.
+
 import { NextRequest, NextResponse } from "next/server";
 
 import {
@@ -5,6 +18,8 @@ import {
   floodwatchFetch,
 } from "@/lib/floodwatch/api";
 import type { Dataset, IoTNode } from "@/lib/floodwatch/types";
+
+export const dynamic = "force-dynamic";
 
 const AI_API_URL = (process.env.AI_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 const SCENARIOS = new Set(["normal", "la_nina", "el_nino"]);

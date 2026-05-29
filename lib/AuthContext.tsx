@@ -388,7 +388,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
           }
         } catch {
-          // Network failure (CRM Vercel down / Upstash blip) — fall
+          // Network failure (CRM Vercel down / Redis blip) — fall
           // through to the legacy path so a user with localStorage
           // tokens can still load the app while the cookie path is
           // unavailable.

@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import NodeMap from "@/components/map/NodeMap";
+import SavedPlacesPanel, { type SavedPlace } from "@/components/map/SavedPlacesPanel";
 import { useTheme } from "@/lib/ThemeContext";
 import { NodeData, type FloodLevel, type Zone } from "@/lib/types";
+import type { IoTNode } from "@/lib/floodwatch/types";
 import { useIoTStream } from "@/components/providers/IoTEventProvider";
 
 // ── IoT zone → NodeData adapter ──────────────────────────────────────────────
@@ -35,6 +37,47 @@ function zoneToNodeData(z: Zone): NodeData {
     is_dead: z.allOffline,
     last_updated: z.lastUpdated ?? new Date().toISOString(),
     created_at: z.lastUpdated ?? new Date().toISOString(),
+  };
+}
+
+/**
+ * IoT API → CRM NodeData adapter.
+ *
+ * The CRM operator console intentionally bypasses the community's
+ * privacy-aggregated `/api/iot/zones` route — operators are authorised
+ * to see raw sensor telemetry (battery voltage, signal strength, exact
+ * GPS) for diagnostic work. This adapter pulls those fields straight
+ * off the upstream IoT API's /nodes response into the local NodeData
+ * shape the map page consumes.
+ */
+function iotNodeToNodeData(n: IoTNode): NodeData {
+  const lat = (typeof n.lat === "number" && n.lat !== 0)
+    ? n.lat
+    : (typeof n.install_lat === "number" && n.install_lat !== 0 ? n.install_lat : 0);
+  const lng = (typeof n.lng === "number" && n.lng !== 0)
+    ? n.lng
+    : (typeof n.install_lng === "number" && n.install_lng !== 0 ? n.install_lng : 0);
+  return {
+    _id: n.node_id,
+    node_id: n.node_id,
+    name: n.node_id,
+    area: n.village_id,
+    location: n.village_id,
+    state: "Sarawak",
+    latitude: lat,
+    longitude: lng,
+    current_level: n.water_level ?? 0,
+    is_dead: n.status === "offline",
+    last_updated: n.last_seen ?? new Date().toISOString(),
+    created_at: n.first_seen ?? new Date().toISOString(),
+    // raw telemetry — operator-only, not in community Zone shape
+    village_id: n.village_id,
+    battery_voltage: n.battery_voltage,
+    float_bits: n.float_bits,
+    rssi: n.rssi,
+    snr: n.snr,
+    gps_fix: n.gps_fix,
+    parent_id: n.parent_id,
   };
 }
 
@@ -102,11 +145,11 @@ const STATUS_OPTIONS = [
 type StatusKey = (typeof STATUS_OPTIONS)[number]["key"];
 
 const STATUS_LEGEND = [
-  { label: "Normal",  description: "No flood risk",           water_level: 0, color: "bg-status-green text-pure-white"    },
-  { label: "Alert",   description: "Minor flooding possible",  water_level: 1, color: "bg-status-warning-1 text-dark-charcoal" },
-  { label: "Warning", description: "Moderate flood risk",      water_level: 2, color: "bg-status-warning-2 text-pure-white" },
-  { label: "Critical", description: "Severe flooding",         water_level: 3, color: "bg-status-danger text-pure-white"   },
-];
+  { key: "normal",   label: "Normal",  description: "No flood risk",           water_level: 0, color: "bg-status-green text-pure-white"    },
+  { key: "alert",    label: "Alert",   description: "Minor flooding possible", water_level: 1, color: "bg-status-warning-1 text-dark-charcoal" },
+  { key: "warning",  label: "Warning", description: "Moderate flood risk",     water_level: 2, color: "bg-status-warning-2 text-pure-white" },
+  { key: "critical", label: "Critical", description: "Severe flooding",        water_level: 3, color: "bg-status-danger text-pure-white"   },
+] as const;
 
 // ── node helpers ─────────────────────────────────────────────────────────────
 
@@ -131,16 +174,6 @@ function statusLabel(node: NodeData) {
   return ["Normal", "Alert", "Warning", "Critical"][node.current_level] ?? "Unknown";
 }
 
-function formatTimeAgo(date: Date): string {
-  const secs = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (secs < 60) return `${secs}s ago`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
 // ── component ─────────────────────────────────────────────────────────────────
 
 export default function FloodMapPage() {
@@ -162,6 +195,11 @@ export default function FloodMapPage() {
     } catch { return new Set(); }
   });
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null);
+
+  // Saved places shared up from the panel so the map can draw radius circles,
+  // plus a right-click "add here" request relayed down to the panel's editor.
+  const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>([]);
+  const [addRequest, setAddRequest] = useState<{ lat: number; lng: number; nonce: number } | null>(null);
 
   function toggleFavourite(nodeId: string) {
     setFavouriteIds(prev => {
@@ -267,18 +305,6 @@ export default function FloodMapPage() {
     [filteredNodes, favouriteIds],
   );
 
-  const recentlyUpdated = useMemo(() =>
-    [...nodes]
-      .sort((a, b) => new Date(b.last_updated).getTime() - new Date(a.last_updated).getTime())
-      .slice(0, 5),
-    [nodes],
-  );
-
-  const recentlyUpdatedIds = useMemo(
-    () => new Set(recentlyUpdated.map(n => n._id)),
-    [recentlyUpdated],
-  );
-
   // ── stats (always from filteredNodes) ─────────────────────────────────────
   const stats = useMemo(() => ({
     total:    filteredNodes.length,
@@ -328,13 +354,17 @@ export default function FloodMapPage() {
   const fetchNodes = useCallback(async () => {
     if (isFirstFetch.current) setIsLoading(true);
     try {
-      const res = await fetch(`/api/iot/zones${datasetSuffix}`, {
+      // Operator console reads the RAW IoT /nodes endpoint (not the
+      // community's privacy-aggregated /api/iot/zones) so the popup
+      // can surface battery voltage, signal, and exact GPS. Admins
+      // are authorised to see this; community visitors are not.
+      const res = await fetch(`/api/iot/nodes${datasetSuffix}`, {
         cache: "no-store",
       });
-      if (!res.ok) throw new Error("Failed to fetch sensor zones");
-      const zones = (await res.json()) as Zone[];
-      if (!Array.isArray(zones)) throw new Error("Unexpected zones payload");
-      setNodes(zones.map(zoneToNodeData));
+      if (!res.ok) throw new Error("Failed to fetch sensor nodes");
+      const raw = (await res.json()) as IoTNode[];
+      if (!Array.isArray(raw)) throw new Error("Unexpected nodes payload");
+      setNodes(raw.map(iotNodeToNodeData));
       setLastFetch(new Date());
       setError(null);
       isFirstFetch.current = false;
@@ -411,6 +441,29 @@ export default function FloodMapPage() {
           return next;
         });
         setLastFetch(new Date());
+      } else if (event.type === "heartbeat") {
+        // Patch live telemetry (battery_voltage, float_bits, signal)
+        // when the IoT API streams a heartbeat for an existing node.
+        // Heartbeats fire ~every 30 s per node so this keeps the popup
+        // fresh without forcing a full refetch.
+        setNodes((prev) => {
+          const idx = prev.findIndex(
+            (n) => n.node_id === event.node_id || n._id === event.node_id,
+          );
+          if (idx === -1) return prev;
+          const next = [...prev];
+          next[idx] = {
+            ...next[idx],
+            battery_voltage: event.bat ?? next[idx].battery_voltage,
+            float_bits: event.float_bits ?? next[idx].float_bits,
+            rssi: event.rssi ?? next[idx].rssi,
+            snr: event.snr ?? next[idx].snr,
+            gps_fix: event.gps_fix ?? next[idx].gps_fix,
+            current_level: (event.water_level as FloodLevel) ?? next[idx].current_level,
+            last_updated: event.timestamp,
+          };
+          return next;
+        });
       } else if (event.type === "alert") {
         // Alerts on new nodes mean we may be missing them entirely —
         // schedule a debounced refetch to pick up freshly-announced
@@ -687,55 +740,58 @@ export default function FloodMapPage() {
               </div>
             </div>
 
-            {/* Recently updated chip bar */}
-            {recentlyUpdated.length > 0 && (
-              <div className="mt-4">
-                <p className={`mb-2 text-[11px] font-semibold uppercase tracking-wide ${muted}`}>
-                  Recently Updated
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {recentlyUpdated.map((node, i) => (
-                    <button key={node._id} type="button" onClick={() => focusNode(node._id)}
-                      title={`Jump to ${node.node_id}${node.location ? ` · ${node.location}` : ""}`}
-                      className={`group flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
-                        isDark ? "border-dark-border bg-dark-bg hover:border-amber-400/60 hover:bg-amber-400/10 text-dark-text"
-                               : "border-light-grey bg-very-light-grey hover:border-amber-400 hover:bg-amber-50 text-dark-charcoal"}`}>
-                      <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-bold ${
-                        i === 0 ? "bg-amber-400 text-dark-charcoal"
-                                : isDark ? "bg-dark-border text-dark-text-muted" : "bg-light-grey text-dark-charcoal/60"}`}>
-                        {i + 1}
-                      </span>
-                      <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${statusDotClass(node)}`} />
-                      <span>{node.node_id}</span>
-                      {node.area && <span className={muted}>· {node.area}</span>}
-                      <span className={`text-[10px] ${muted}`}>{formatTimeAgo(new Date(node.last_updated))}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
             <div className={`mt-4 rounded-3xl border ${isDark ? "border-dark-border" : "border-light-grey"}`}>
               <NodeMap
                 nodes={filteredNodes}
                 height={460}
                 zoom={12}
                 focusNodeId={focusNodeId}
-                highlightedIds={recentlyUpdatedIds}
                 favouriteIds={favouriteIds}
                 onToggleFavourite={toggleFavourite}
+                enableMyLocation
+                autoLocate
+                savedPlaces={savedPlaces}
+                onMapRightClick={(lat, lng) =>
+                  setAddRequest((prev) => ({ lat, lng, nonce: (prev?.nonce ?? 0) + 1 }))
+                }
               />
             </div>
 
-            {/* Water-level legend row */}
-            <div className={`mt-4 flex flex-wrap items-center gap-4 text-sm ${sub}`}>
-              <span className={`font-semibold ${body}`}>Water Level:</span>
-              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-status-green" /> Normal ({stats.normal})</span>
-              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-status-warning-1" /> Alert ({stats.alert})</span>
-              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-status-warning-2" /> Warning ({stats.warning})</span>
-              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-status-danger" /> Critical ({stats.critical})</span>
-            </div>
+            {/* Water-level chip strip below the map was removed (2026-05-22):
+                the four counts now live inside the Status Legend sidebar
+                so the operator gets severity + description + count in one
+                place. See <STATUS_LEGEND map> below. */}
           </article>
+
+          {/* My Saved Places — operator bookmarks with radius-based
+              node-count badges. localStorage-backed; no Java round-trip. */}
+          <SavedPlacesPanel
+            nodes={nodes}
+            onFocusPlace={(lat, lng) => {
+              // Reuse the same "focus a sensor" pipeline via a synthetic node
+              // anchor. The map's onMapLoad already pans to the first set of
+              // nodes; explicit focusNode on a non-node lat/lng isn't wired
+              // through, so fall back to a window-level event the page can
+              // listen for. Simplest path: directly pan via the URL hash so
+              // the map's setFocus effect picks it up. Future work.
+              if (typeof window !== "undefined") {
+                window.scrollTo({ top: 0, behavior: "smooth" });
+                window.dispatchEvent(
+                  new CustomEvent("crm-map-focus-coord", {
+                    detail: { lat, lng },
+                  }),
+                );
+              }
+            }}
+            defaultCentre={
+              nodes.length > 0
+                ? { lat: nodes[0].latitude, lng: nodes[0].longitude }
+                : { lat: 1.553, lng: 110.344 }
+            }
+            isDark={isDark}
+            onPlacesChange={setSavedPlaces}
+            addRequest={addRequest}
+          />
 
           {/* All-nodes grid */}
           <article className={card}>
@@ -903,27 +959,36 @@ export default function FloodMapPage() {
             )}
           </div>
 
-          {/* Status legend */}
+          {/* Status legend — merged with the Water Level counts that
+              used to sit below the map (2026-05-22). Each pill row now
+              shows the severity label + description + live count, so
+              ops gets the same information in one place instead of two. */}
           <div className={card}>
             <h2 className={`text-lg font-semibold ${body}`}>Status Legend</h2>
             <p className={`text-xs ${sub}`}>Every pin follows the Sarawak flood SOP levels.</p>
             <ul className="mt-4 space-y-3">
-              {STATUS_LEGEND.map(legend => (
-                <li key={legend.label}
-                  className={`flex items-center justify-between rounded-2xl border px-4 py-3 transition-colors ${
-                    isDark ? "border-dark-border bg-dark-bg" : "border-light-grey"}`}>
-                  <div className="flex items-center gap-3">
-                    <span className={`flex h-10 w-10 items-center justify-center rounded-full font-semibold ${legend.color}`}>
-                      {legend.water_level}
-                    </span>
-                    <div>
-                      <p className={`text-sm font-semibold ${body}`}>{legend.label}</p>
-                      <p className={`text-xs ${sub}`}>{legend.description}</p>
+              {STATUS_LEGEND.map(legend => {
+                const count = stats[legend.key];
+                return (
+                  <li key={legend.key}
+                    className={`flex items-center justify-between rounded-2xl border px-4 py-3 transition-colors ${
+                      isDark ? "border-dark-border bg-dark-bg" : "border-light-grey"}`}>
+                    <div className="flex items-center gap-3">
+                      <span className={`flex h-10 w-10 items-center justify-center rounded-full font-semibold ${legend.color}`}>
+                        {legend.water_level}
+                      </span>
+                      <div>
+                        <p className={`text-sm font-semibold ${body}`}>{legend.label}</p>
+                        <p className={`text-xs ${sub}`}>{legend.description}</p>
+                      </div>
                     </div>
-                  </div>
-                  <span className="text-sm font-semibold text-primary-blue">LVL {legend.water_level}</span>
-                </li>
-              ))}
+                    <div className="flex flex-col items-end leading-tight">
+                      <span className={`text-base font-bold ${body}`}>{count}</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wide text-primary-blue">LVL {legend.water_level}</span>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
             <div className={`mt-4 rounded-2xl px-4 py-3 text-xs ${isDark ? "bg-dark-bg text-dark-text-secondary" : "bg-very-light-grey text-dark-charcoal/70"}`}>
               <p className={`font-semibold uppercase tracking-wide ${body}`}>Map Info</p>

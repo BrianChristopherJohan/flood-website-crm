@@ -3,11 +3,12 @@
 /**
  * <BlogImageUploader /> — file-input based hero-image picker for the
  * Blog Management modal. Resizes a chosen image to fit inside a
- * 1280×720 box (16:9) at JPEG quality 0.85 and emits a
- * `data:image/jpeg;base64,…` URL the caller can hand straight to the
- * existing imageUrl field. No backend storage needed — the resized
- * payload (~120-280 KB) fits comfortably in the now-TEXT image_url
- * column on the blogs table.
+ * 1280×720 box (16:9) and ADAPTIVELY compresses it (stepping JPEG
+ * quality down, then downscaling if needed) so the emitted
+ * `data:image/jpeg;base64,…` URL stays under a bounded byte budget
+ * regardless of the source image. The result is handed straight to the
+ * imageUrl field and persisted to the (TEXT) blogs.image_url column —
+ * keeping the row, the BFF request body, and the DB lean.
  */
 
 import { useCallback, useRef, useState } from "react";
@@ -16,6 +17,11 @@ const MAX_W = 1280;
 const MAX_H = 720;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_INPUT_BYTES = 10 * 1024 * 1024;
+// Defensive payload cap: keep the stored data: URL ≲ this many encoded
+// bytes so a big source photo can't bloat the request/DB row.
+const TARGET_BYTES = 320 * 1024;
+// Quality ladder tried (best → most-compressed) before we downscale.
+const QUALITY_STEPS = [0.82, 0.72, 0.62, 0.52, 0.42];
 
 type Props = {
   value: string | null;
@@ -24,20 +30,47 @@ type Props = {
   className?: string;
 };
 
+/** Approximate the decoded byte size of a base64 data: URL. */
+function dataUrlBytes(dataUrl: string): number {
+  const comma = dataUrl.indexOf(",");
+  const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+  const padding = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((b64.length * 3) / 4) - padding);
+}
+
 async function fileToResizedJpegDataUrl(file: File): Promise<string> {
   const bitmap = await createImageBitmap(file);
-  // Letterbox into MAX_W x MAX_H while preserving aspect ratio.
-  const scale = Math.min(MAX_W / bitmap.width, MAX_H / bitmap.height, 1);
-  const targetW = Math.round(bitmap.width * scale);
-  const targetH = Math.round(bitmap.height * scale);
-  const canvas = document.createElement("canvas");
-  canvas.width = targetW;
-  canvas.height = targetH;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas not supported in this browser.");
-  ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+  // Fit into MAX_W x MAX_H while preserving aspect ratio (never upscale).
+  let scale = Math.min(MAX_W / bitmap.width, MAX_H / bitmap.height, 1);
+
+  const render = (s: number, q: number): string => {
+    const targetW = Math.max(1, Math.round(bitmap.width * s));
+    const targetH = Math.max(1, Math.round(bitmap.height * s));
+    const canvas = document.createElement("canvas");
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Canvas not supported in this browser.");
+    ctx.drawImage(bitmap, 0, 0, targetW, targetH);
+    return canvas.toDataURL("image/jpeg", q);
+  };
+
+  // 1) Step JPEG quality down at the target size until under budget.
+  let best = render(scale, QUALITY_STEPS[0]);
+  for (let i = 1; i < QUALITY_STEPS.length && dataUrlBytes(best) > TARGET_BYTES; i++) {
+    best = render(scale, QUALITY_STEPS[i]);
+  }
+  // 2) Still over budget at the lowest quality? Downscale the canvas and
+  //    retry a few times (a hard floor of 30% keeps it usable).
+  let guard = 0;
+  while (dataUrlBytes(best) > TARGET_BYTES && scale > 0.3 && guard < 4) {
+    scale *= 0.8;
+    best = render(scale, QUALITY_STEPS[QUALITY_STEPS.length - 1]);
+    guard++;
+  }
+
   bitmap.close?.();
-  return canvas.toDataURL("image/jpeg", 0.85);
+  return best;
 }
 
 export default function BlogImageUploader({ value, onChange, onClear, className = "" }: Props) {
@@ -144,7 +177,7 @@ export default function BlogImageUploader({ value, onChange, onClear, className 
           </button>
         )}
         <span className="ml-1 text-[11px] text-[var(--color-muted)]">
-          JPEG, PNG, or WebP. We resize to fit 1280×720 before storing.
+          JPEG, PNG, or WebP. We resize to fit 1280×720 and compress before storing.
         </span>
       </div>
       {error && (

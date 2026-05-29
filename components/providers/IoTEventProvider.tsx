@@ -482,6 +482,34 @@ const POPUP_COOLDOWN_PER_KEY_MS = 30_000;
 const GLOBAL_POPUP_RATE_MAX = 5;
 const GLOBAL_POPUP_WINDOW_MS = 10_000;
 
+/**
+ * Per-severity pop-up gate, sourced from CRM Settings → Notifications →
+ * Alert Preferences (persisted in localStorage["crmSettings"]). When an
+ * operator turns a severity off, matching alerts are STILL recorded in
+ * the bell history (lossless) — they just don't pop a toast / chime /
+ * desktop notification. Read at alert time so a Settings change takes
+ * effect without a reload; fails open (returns true) on any parse error.
+ *
+ * Defaults mirror the Settings page's defaultSettings when nothing has
+ * been saved yet: critical ON, warning OFF, watch ON.
+ */
+function popupAllowedForSeverity(sev: AlertSeverity): boolean {
+  if (typeof window === "undefined") return true;
+  try {
+    const raw = window.localStorage.getItem("crmSettings");
+    if (!raw) return sev !== "warning";
+    const s = JSON.parse(raw) as {
+      dangerAlertEmail?: boolean;
+      warningAlertEmail?: boolean;
+    };
+    if (sev === "critical") return s.dangerAlertEmail !== false; // default on
+    if (sev === "warning") return s.warningAlertEmail === true; // default off
+    return true; // watch — no per-severity toggle
+  } catch {
+    return true;
+  }
+}
+
 export function IoTEventProvider({ children }: { children: ReactNode }) {
   // Forward `?dataset=` from the URL into the SSE stream so the page's
   // visible zones and the live event stream always agree on which
@@ -652,6 +680,14 @@ export function IoTEventProvider({ children }: { children: ReactNode }) {
         // still respects the per-key cooldown so we don't double-pop
         // the same node.
         const sev = alertSeverity(alert);
+
+        // Operator preference gate (Settings → Notifications → Alert
+        // Preferences). A severity the operator switched off is kept in
+        // the bell history above but never pops a toast / chime / desktop
+        // notification. Checked before the rate-limiter bookkeeping so a
+        // suppressed alert doesn't consume the cooldown/global window.
+        if (!popupAllowedForSeverity(sev)) return;
+
         const lastPop = lastPopPerKey.current.get(dedupeKey) ?? 0;
         const cooldownPassed = now - lastPop >= POPUP_COOLDOWN_PER_KEY_MS;
 

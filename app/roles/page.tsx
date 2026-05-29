@@ -3,8 +3,44 @@
 import { useEffect, useState, useCallback } from "react";
 import { useTheme } from "@/lib/ThemeContext";
 import { useAuth } from "@/lib/AuthContext";
-import { authFetchJson } from "@/lib/authFetch";
 import toast from "react-hot-toast";
+
+// Call a same-origin BFF route using the httpOnly auth cookie. On 401/403
+// the access cookie may have expired — call silentRefresh() once (it
+// rotates the cookie via /api/auth/refresh) then retry. Decoupled from
+// the in-memory accessToken, which is null on the cookie-based session
+// (SSO handoff / fresh login) and previously left this page gated shut.
+async function cookieFetchJson<T>(
+  url: string,
+  silentRefresh: () => Promise<string | null>,
+  options: RequestInit = {},
+): Promise<T> {
+  const doFetch = () =>
+    fetch(url, { ...options, cache: "no-store", credentials: "include" });
+
+  let res = await doFetch();
+  if (res.status === 401 || res.status === 403) {
+    await silentRefresh();
+    res = await doFetch();
+  }
+
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const body = (await res.json()) as { error?: string; message?: string };
+      if (typeof body?.error === "string") message = body.error;
+      else if (typeof body?.message === "string") message = body.message;
+    } catch {
+      /* keep generic message */
+    }
+    throw new Error(message);
+  }
+
+  if (res.status === 204) return undefined as T;
+  const ct = res.headers.get("content-type") ?? "";
+  if (!ct.includes("application/json")) return undefined as T;
+  return res.json() as Promise<T>;
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -81,7 +117,7 @@ function roleBadge(role: string) {
 
 export default function RolesPage() {
   const { isDark } = useTheme();
-  const { accessToken, silentRefresh, user: currentUser } = useAuth();
+  const { silentRefresh, user: currentUser } = useAuth();
 
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -98,24 +134,20 @@ export default function RolesPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  // ── API calls (authFetchJson = silent refresh on 401) ───────────────────────
+  // ── API calls (cookieFetchJson = httpOnly cookie + silent refresh on 401) ────
 
   const fetchUsers = useCallback(async () => {
-    if (!accessToken) {
-      setIsLoading(false);
-      return;
-    }
     setIsLoading(true);
     setError(null);
     try {
-      const data = await authFetchJson<AdminUser[]>("/api/admin/users", accessToken, silentRefresh);
+      const data = await cookieFetchJson<AdminUser[]>("/api/admin/users", silentRefresh);
       setUsers(Array.isArray(data) ? data : []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load users");
     } finally {
       setIsLoading(false);
     }
-  }, [accessToken, silentRefresh]);
+  }, [silentRefresh]);
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
@@ -127,10 +159,9 @@ export default function RolesPage() {
     if (!form.email.includes("@")) { setFormError("Valid email required"); return; }
     if (form.password.length < 8) { setFormError("Password must be at least 8 characters"); return; }
 
-    if (!accessToken) return;
     setIsSaving(true);
     try {
-      const created = await authFetchJson<AdminUser>("/api/admin/users", accessToken, silentRefresh, {
+      const created = await cookieFetchJson<AdminUser>("/api/admin/users", silentRefresh, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -171,16 +202,14 @@ export default function RolesPage() {
     e.preventDefault();
     if (!editUser) return;
     setFormError(null);
-    if (!accessToken) return;
     setIsSaving(true);
     try {
       const body: Record<string, string> = { role: form.role };
       if (form.firstName.trim()) body.firstName = form.firstName.trim();
       if (form.lastName.trim()) body.lastName = form.lastName.trim();
 
-      const updated = await authFetchJson<AdminUser>(
+      const updated = await cookieFetchJson<AdminUser>(
         `/api/admin/users/${editUser.id}`,
-        accessToken,
         silentRefresh,
         {
           method: "PATCH",
@@ -202,10 +231,10 @@ export default function RolesPage() {
   // ── Delete user ─────────────────────────────────────────────────────────────
 
   async function handleDelete() {
-    if (!deleteTarget || !accessToken) return;
+    if (!deleteTarget) return;
     setIsSaving(true);
     try {
-      await authFetchJson<undefined>(`/api/admin/users/${deleteTarget.id}`, accessToken, silentRefresh, {
+      await cookieFetchJson<undefined>(`/api/admin/users/${deleteTarget.id}`, silentRefresh, {
         method: "DELETE",
       });
       setUsers((prev) => prev.filter((u) => u.id !== deleteTarget.id));

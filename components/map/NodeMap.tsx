@@ -3,9 +3,11 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 
 import {
+  Autocomplete,
   Circle,
   GoogleMap,
   InfoWindow,
+  Marker,
   type Libraries,
   useJsApiLoader,
 } from "@react-google-maps/api";
@@ -22,7 +24,7 @@ import { NodeData, getStatusLabel, getMarkerColor } from "@/lib/types";
  * — `useJsApiLoader` re-creates the script tag on every render if a
  * new array slot is passed in.
  */
-const MAPS_LIBRARIES: Libraries = ["geometry", "marker"];
+const MAPS_LIBRARIES: Libraries = ["geometry", "marker", "places"];
 
 type NodeMapProps = {
   nodes: NodeData[];
@@ -36,8 +38,14 @@ type NodeMapProps = {
   favouriteIds?: Set<string>;
   /** Called when the user clicks the star button in the InfoWindow */
   onToggleFavourite?: (nodeId: string) => void;
-  /** Per-node circle radius in metres. Defaults to 250 m to match the community site. */
-  circleRadiusM?: number;
+  /** Show the "use my location" control (geolocation → pan + blue dot). */
+  enableMyLocation?: boolean;
+  /** Auto-request geolocation once on mount and pan to the user (like community). */
+  autoLocate?: boolean;
+  /** Right-click anywhere on the map → add a saved place at that coordinate. */
+  onMapRightClick?: (lat: number, lng: number) => void;
+  /** Saved places to draw as radius circles + centre markers. */
+  savedPlaces?: { id: string; label: string; latitude: number; longitude: number; radiusKm: number }[];
 };
 
 const mapStyles: google.maps.MapTypeStyle[] = [
@@ -123,11 +131,14 @@ export default function NodeMap({
   highlightedIds,
   favouriteIds,
   onToggleFavourite,
-  circleRadiusM = 250,
+  enableMyLocation = false,
+  autoLocate = false,
+  onMapRightClick,
+  savedPlaces,
 }: NodeMapProps) {
-  // hoveredNodeId  — transient, cleared when mouse leaves
-  // clickedNodeId  — persistent, survives mouse-leave so user can interact with InfoWindow
-  const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
+  // clickedNodeId — the node whose InfoWindow is open. The InfoWindow opens
+  // ONLY on click (hover no longer opens it, per UX request); clicking the
+  // same pin again toggles it closed.
   const [clickedNodeId, setClickedNodeId] = useState<string | null>(null);
   const [nodePredictionScale, setNodePredictionScale] = useState<NodePredictionScale>("weekly");
   // Derived: clicked takes priority over hovered
@@ -135,6 +146,73 @@ export default function NodeMap({
   const [mapError, setMapError] = useState(false);
   const [lastFocusedNodeId, setLastFocusedNodeId] = useState<string | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
+
+  // ── Places Autocomplete search box (ported from community) ───────────────
+  // Mounts a Google Places Autocomplete on the map header. When the admin
+  // picks a suggestion, we pan the camera, drop a teardrop pin at the
+  // chosen coords, and surface its name + reverse-geocoded address +
+  // count of nearby flood sensors. Keeps the operator console at parity
+  // with the public site's place-search affordance.
+  const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchedPlace, setSearchedPlace] = useState<
+    | { lat: number; lng: number; name: string; address: string | null }
+    | null
+  >(null);
+  const [searchedPlaceClicked, setSearchedPlaceClicked] = useState(false);
+
+  // ── "Use my location" (geolocation) ──────────────────────────────────────
+  // On demand (button click — never auto, which browsers block and which is
+  // jarring), request the browser location, pan + zoom the camera there, and
+  // drop a blue "you are here" dot. Errors (denied / unsupported / timeout)
+  // surface a short message on the control without breaking the map.
+  const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [locError, setLocError] = useState<string | null>(null);
+
+  const locateMe = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setLocError("Location isn't supported by this browser.");
+      return;
+    }
+    setLocating(true);
+    setLocError(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setMyLocation({ lat, lng });
+        if (mapRef.current) {
+          mapRef.current.panTo({ lat, lng });
+          mapRef.current.setZoom(15);
+        }
+        setLocating(false);
+      },
+      (err) => {
+        setLocating(false);
+        setLocError(
+          err.code === err.PERMISSION_DENIED
+            ? "Location blocked — allow it in your browser, then retry."
+            : err.code === err.TIMEOUT
+              ? "Timed out getting your location. Try again."
+              : "Couldn't get your location. Try again.",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+    );
+  }, []);
+
+  // Right-click → bubble the clicked coordinate up so the page can open the
+  // "add saved place" editor prefilled there (mirrors the community map's
+  // right-click-to-save-a-home UX). Google Maps suppresses its own context
+  // menu on the canvas, so this doesn't fight the browser menu.
+  const handleMapRightClick = useCallback(
+    (e: google.maps.MapMouseEvent) => {
+      if (!onMapRightClick || !e.latLng) return;
+      onMapRightClick(e.latLng.lat(), e.latLng.lng());
+    },
+    [onMapRightClick],
+  );
 
   const { isLoaded, loadError } = useJsApiLoader({
     id: "google-map-script",
@@ -196,6 +274,72 @@ export default function NodeMap({
     0,
   );
 
+  // Fired when the admin picks a Google Places suggestion from the
+  // Autocomplete dropdown. Pans the camera, drops a teardrop marker
+  // at the chosen coords, and opens its InfoWindow.
+  const handlePlaceChanged = useCallback(() => {
+    const ac = autocompleteRef.current;
+    if (!ac) return;
+    const place = ac.getPlace();
+    if (!place.geometry?.location) return;
+    const lat = place.geometry.location.lat();
+    const lng = place.geometry.location.lng();
+    const name =
+      place.name ?? place.formatted_address ?? "Selected location";
+    const address = place.formatted_address ?? null;
+    if (mapRef.current) {
+      mapRef.current.panTo({ lat, lng });
+      mapRef.current.setZoom(14);
+    }
+    setSearchInput(name);
+    setSearchedPlace({ lat, lng, name, address });
+    setSearchedPlaceClicked(true);
+  }, []);
+
+  // ── Reverse-geocoded street address for the currently-open popup ─────────
+  // The Google Maps Geocoder uses the same JS API key already loaded for the
+  // map, so no extra env var is needed. We cache results in a Map keyed on
+  // the rounded lat/lng so opening the same pin twice doesn't burn a quota
+  // hit. Falls back silently to "—" when geocoding fails (no result, quota,
+  // network blip) — the operator still sees raw lat/lng in the popup.
+  const geocodeCache = useRef<Map<string, string>>(new Map());
+  const [activeAddress, setActiveAddress] = useState<string | null>(null);
+  useEffect(() => {
+    if (!activeNode || !isLoaded) { setActiveAddress(null); return; }
+    const key = `${activeNode.latitude.toFixed(5)},${activeNode.longitude.toFixed(5)}`;
+    const hit = geocodeCache.current.get(key);
+    if (hit) { setActiveAddress(hit); return; }
+    setActiveAddress(null);
+    let cancelled = false;
+    try {
+      const geocoder = new google.maps.Geocoder();
+      geocoder.geocode(
+        { location: { lat: activeNode.latitude, lng: activeNode.longitude } },
+        (results, status) => {
+          if (cancelled) return;
+          if (status === "OK" && results && results[0]) {
+            const addr = results[0].formatted_address;
+            geocodeCache.current.set(key, addr);
+            setActiveAddress(addr);
+          } else {
+            // Surface quota / no-result failures in the console so an
+            // operator (or we, debugging) can tell "no address" apart
+            // from a silent API failure. ZERO_RESULTS is benign; others
+            // (OVER_QUERY_LIMIT, REQUEST_DENIED) signal a config issue.
+            if (status !== "ZERO_RESULTS") {
+              console.warn(`[NodeMap] reverse-geocode failed: status=${status} for ${key}`);
+            }
+            setActiveAddress("—");
+          }
+        },
+      );
+    } catch (err) {
+      console.warn("[NodeMap] reverse-geocode threw:", err instanceof Error ? err.message : err);
+      setActiveAddress("—");
+    }
+    return () => { cancelled = true; };
+  }, [activeNode, isLoaded]);
+
   // Callback to store map reference + flip the readiness flag so the
   // first-load auto-fit effect re-runs once the camera is controllable.
   const [mapReady, setMapReady] = useState(false);
@@ -203,6 +347,22 @@ export default function NodeMap({
     mapRef.current = map;
     setMapError(false);
     setMapReady(true);
+  }, []);
+
+  // Pan the map when the Saved Places panel asks to focus a coordinate.
+  // The /map page dispatches a `crm-map-focus-coord` CustomEvent when an
+  // operator clicks a saved-place row; previously nothing listened so
+  // the click did nothing. Here we recentre + zoom in on that point.
+  useEffect(() => {
+    function onFocusCoord(e: Event) {
+      const detail = (e as CustomEvent<{ lat: number; lng: number }>).detail;
+      if (!detail || !mapRef.current) return;
+      if (typeof detail.lat !== "number" || typeof detail.lng !== "number") return;
+      mapRef.current.panTo({ lat: detail.lat, lng: detail.lng });
+      mapRef.current.setZoom(14);
+    }
+    window.addEventListener("crm-map-focus-coord", onFocusCoord as EventListener);
+    return () => window.removeEventListener("crm-map-focus-coord", onFocusCoord as EventListener);
   }, []);
 
   // First-load auto-fit: when nodes load *after* the GoogleMap mounts
@@ -236,6 +396,20 @@ export default function NodeMap({
     }
     didAutoFit.current = true;
   }, [nodes, mapReady, focusNodeId]);
+
+  // Auto-locate on first load: when `autoLocate` is set, request the browser
+  // location once the map is controllable and pan to the user — same
+  // behaviour as the community map. Runs once; skipped when a deep-link
+  // focusNodeId is requested. If permission is denied/unavailable the
+  // earlier auto-fit (nodes bounding box) stays as the fallback view.
+  const didAutoLocate = useRef(false);
+  useEffect(() => {
+    if (!autoLocate || didAutoLocate.current) return;
+    if (!mapReady || !mapRef.current) return;
+    didAutoLocate.current = true;
+    if (focusNodeId) return; // deep-link wins — don't yank the camera away
+    locateMe();
+  }, [autoLocate, mapReady, focusNodeId, locateMe]);
 
   // Show placeholder if no valid API key or if there's an error
   if (!hasValidApiKey || mapError || loadError) {
@@ -336,53 +510,243 @@ export default function NodeMap({
   }
 
   return (
-    <GoogleMap
-      mapContainerStyle={{ width: "100%", height, borderRadius: "16px" }}
-      center={mapCenter}
-      zoom={zoom}
-      options={{
-        disableDefaultUI: true,
-        zoomControl: true,
-        styles: mapStyles,
-        gestureHandling: "greedy",
-      }}
-      onLoad={onMapLoad}
-    >
+    <div style={{ position: "relative", width: "100%", height }}>
+      {/* ── Places Autocomplete search box (top-left overlay) ─────────────
+          Mirrors the community map's place-search UX so admins can jump
+          to any address. The Autocomplete is restricted to Malaysia +
+          biased to the current map centre so suggestions stay relevant.
+      */}
+      <div
+        style={{
+          position: "absolute",
+          top: 12,
+          left: 12,
+          zIndex: 10,
+          maxWidth: "calc(100% - 24px)",
+          width: 320,
+          pointerEvents: "none",
+        }}
+      >
+        <div
+          style={{
+            pointerEvents: "auto",
+            background: "#fff",
+            borderRadius: 999,
+            boxShadow: "0 4px 12px -2px rgba(0,0,0,0.18)",
+            display: "flex",
+            alignItems: "center",
+            paddingRight: 4,
+          }}
+        >
+          <Autocomplete
+            onLoad={(ac) => {
+              autocompleteRef.current = ac;
+              // Bias suggestions to the map's current viewport so a
+              // "Jalan Song" near Kuching outranks the same name across MY.
+              if (mapRef.current && typeof google !== "undefined") {
+                const c = mapRef.current.getCenter();
+                if (c) {
+                  const bounds = new google.maps.LatLngBounds(c, c);
+                  ac.setBounds(bounds);
+                }
+              }
+            }}
+            onPlaceChanged={handlePlaceChanged}
+            options={{
+              componentRestrictions: { country: ["my"] },
+              fields: ["geometry", "name", "formatted_address"],
+            }}
+          >
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => {
+                const v = e.target.value;
+                setSearchInput(v);
+                if (v.trim() === "") setSearchedPlace(null);
+              }}
+              placeholder="Search a place…"
+              aria-label="Search for a place"
+              style={{
+                width: "100%",
+                padding: "10px 16px",
+                fontSize: 14,
+                color: "#0f172a",
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                borderRadius: 999,
+              }}
+            />
+          </Autocomplete>
+          {(searchInput.length > 0 || searchedPlace) && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchInput("");
+                setSearchedPlace(null);
+                setSearchedPlaceClicked(false);
+              }}
+              aria-label="Clear search"
+              style={{
+                marginLeft: 4,
+                width: 28,
+                height: 28,
+                borderRadius: 999,
+                background: "transparent",
+                border: "none",
+                color: "#94a3b8",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"
+                   style={{ width: 14, height: 14 }}>
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── "Use my location" control (top-right overlay) ─────────────────── */}
+      {enableMyLocation && (
+        <div style={{ position: "absolute", top: 12, right: 12, zIndex: 10, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+          <button
+            type="button"
+            onClick={locateMe}
+            disabled={locating}
+            aria-label="Show my location"
+            title={myLocation ? "Re-centre on my location" : "Show my location"}
+            style={{
+              width: 40, height: 40, borderRadius: 999, background: "#fff",
+              boxShadow: "0 4px 12px -2px rgba(0,0,0,0.18)", border: "none",
+              cursor: locating ? "default" : "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              color: locError ? "#dc2626" : myLocation ? "#1a73e8" : "#475569",
+            }}
+          >
+            {locating ? (
+              <span
+                className="animate-spin"
+                style={{ width: 18, height: 18, borderRadius: 999, border: "2px solid #cbd5e1", borderTopColor: "#1a73e8", display: "inline-block" }}
+              />
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ width: 20, height: 20 }}>
+                <circle cx="12" cy="12" r="3.5" />
+                <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+              </svg>
+            )}
+          </button>
+          {locError && (
+            <div style={{ maxWidth: 220, background: "#fff", color: "#dc2626", fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 10, boxShadow: "0 4px 12px -2px rgba(0,0,0,0.18)" }}>
+              {locError}
+            </div>
+          )}
+        </div>
+      )}
+
+      <GoogleMap
+        mapContainerStyle={{ width: "100%", height, borderRadius: "16px" }}
+        center={mapCenter}
+        zoom={zoom}
+        options={{
+          disableDefaultUI: true,
+          zoomControl: true,
+          styles: mapStyles,
+          gestureHandling: "greedy",
+        }}
+        onLoad={onMapLoad}
+        onRightClick={handleMapRightClick}
+      >
+      {/* Saved-place radius circles + centre markers (right-click to add). */}
+      {savedPlaces?.map((pl) => (
+        <React.Fragment key={pl.id}>
+          <Circle
+            center={{ lat: pl.latitude, lng: pl.longitude }}
+            radius={pl.radiusKm * 1000}
+            options={{
+              strokeColor: "#1a73e8",
+              strokeOpacity: 0.85,
+              strokeWeight: 1.5,
+              fillColor: "#1a73e8",
+              fillOpacity: 0.08,
+              clickable: false,
+              zIndex: 1,
+            }}
+          />
+          <Marker
+            position={{ lat: pl.latitude, lng: pl.longitude }}
+            title={`${pl.label} · ${pl.radiusKm} km radius`}
+            icon={{
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 5,
+              fillColor: "#1a73e8",
+              fillOpacity: 1,
+              strokeColor: "#ffffff",
+              strokeWeight: 2,
+            }}
+            zIndex={5}
+          />
+        </React.Fragment>
+      ))}
       {nodes.map((node) => {
         const isHighlighted = highlightedIds?.has(node._id) || latestUpdatedNode?._id === node._id;
         const color = getMarkerColor(node);
+        // Classic teardrop pin SVG path. Origin (0,0) sits at the tip
+        // so the marker anchor lines up exactly with the sensor coord.
+        // Scaled to ~32 px on screen; highlighted pins get a thicker
+        // gold stroke + larger scale to pop above the rest.
+        const pinIcon: google.maps.Symbol = {
+          path: "M 0,0 C -2,-20 -10,-22 -10,-30 A 10,10 0 1,1 10,-30 C 10,-22 2,-20 0,0 z",
+          fillColor: color,
+          fillOpacity: 1,
+          strokeColor: isHighlighted ? "#FFB800" : "#1a1a1a",
+          strokeWeight: isHighlighted ? 2.5 : 1.25,
+          scale: isHighlighted ? 1.25 : 1,
+          anchor: new google.maps.Point(0, 0),
+          labelOrigin: new google.maps.Point(0, -22),
+        };
         return (
-          <React.Fragment key={node._id}>
-            {/* Coloured zone-of-influence disk. Click opens the
-                InfoWindow (we dropped the marker pin entirely so
-                operators see exactly what the privacy aggregator
-                allows: a circle, not a pinpoint coord). */}
-            <Circle
-              center={{ lat: node.latitude, lng: node.longitude }}
-              radius={circleRadiusM}
-              options={{
-                strokeColor: isHighlighted ? "#FFB800" : color,
-                strokeWeight: isHighlighted ? 3 : 1.5,
-                strokeOpacity: 0.95,
-                fillColor: color,
-                fillOpacity: 0.35,
-                clickable: true,
-                zIndex: isHighlighted ? 10 : 1,
-              }}
-              onMouseOver={() => setHoveredNodeId(node._id)}
-              onMouseOut={() => setHoveredNodeId(null)}
-              onClick={() =>
-                setClickedNodeId((prev) => (prev === node._id ? null : node._id))
-              }
-            />
-          </React.Fragment>
+          <Marker
+            key={node._id}
+            position={{ lat: node.latitude, lng: node.longitude }}
+            icon={pinIcon}
+            zIndex={isHighlighted ? 10 : 1}
+            onClick={() =>
+              setClickedNodeId((prev) => (prev === node._id ? null : node._id))
+            }
+          />
         );
       })}
+      {myLocation && (
+        <Marker
+          position={myLocation}
+          icon={{
+            path: google.maps.SymbolPath.CIRCLE,
+            scale: 7,
+            fillColor: "#1a73e8",
+            fillOpacity: 1,
+            strokeColor: "#ffffff",
+            strokeWeight: 3,
+          }}
+          zIndex={9999}
+          title="Your location"
+        />
+      )}
       {activeNode && (
         <InfoWindow
           position={{ lat: activeNode.latitude, lng: activeNode.longitude }}
-          onCloseClick={() => { setClickedNodeId(null); setHoveredNodeId(null); }}
+          onCloseClick={() => setClickedNodeId(null)}
           options={{
+            // Anchor the InfoWindow above the pin's head (~30 px up from
+            // the tip, which is at the node lat/lng). Was -34 for the
+            // legacy Circle centre; the new pin sits with its tip at the
+            // coord so we shift up by the pin's own height plus a small
+            // gap so the speech-bubble tail clears the marker outline.
             pixelOffset: new google.maps.Size(0, -34),
             disableAutoPan: false,
           }}
@@ -438,12 +802,56 @@ export default function NodeMap({
                   {activeNode.is_dead ? "Offline" : "Online"}
                 </strong>
               </div>
+              {typeof activeNode.battery_voltage === "number" && (() => {
+                const bat = getBatteryStatus(activeNode.battery_voltage);
+                return (
+                  <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span>
+                      Battery:{" "}
+                      <strong style={{ color: bat.hex }}>
+                        {activeNode.battery_voltage.toFixed(2)} V
+                      </strong>
+                      {bat.pct !== null ? ` (~${bat.pct}%)` : ""}
+                    </span>
+                    <span style={{
+                      background: `${bat.hex}22`, color: bat.hex,
+                      fontSize: 10, fontWeight: 700, padding: "1px 6px",
+                      borderRadius: 999,
+                    }}>
+                      {bat.label}
+                    </span>
+                  </div>
+                );
+              })()}
+              {activeNode.village_id && (
+                <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14 }}>
+                  Village: <strong>{activeNode.village_id}</strong>
+                </div>
+              )}
+              {(typeof activeNode.rssi === "number" || typeof activeNode.snr === "number") && (
+                <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14 }}>
+                  Signal:{" "}
+                  <strong>
+                    {typeof activeNode.rssi === "number" ? `${activeNode.rssi} dBm` : "—"}
+                    {typeof activeNode.snr === "number" ? ` · SNR ${activeNode.snr.toFixed(1)} dB` : ""}
+                  </strong>
+                </div>
+              )}
+              {activeNode.parent_id && (
+                <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14 }}>
+                  Parent: <strong>{activeNode.parent_id}</strong>
+                </div>
+              )}
               <div style={{ fontSize: 12, color: "#374151", paddingLeft: 14 }}>
                 Last Updated:{" "}
                 <span style={{ fontWeight: 500 }}>
-                  {new Date(activeNode.last_updated).toLocaleString("en-MY", {
-                    dateStyle: "short", timeStyle: "short",
-                  })}
+                  {new Date(activeNode.last_updated).toLocaleString("en-GB", {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                    timeZone: "Asia/Kuala_Lumpur",
+                    hour12: false,
+                  })}{" "}
+                  MYT
                 </span>
               </div>
             </div>
@@ -531,13 +939,109 @@ export default function NodeMap({
               </div>
             </div>
 
-            {/* ── Coordinates ── */}
-            <p style={{
-              fontSize: 10, color: "#9ca3af", margin: "0 0 10px",
+            {/* ── AI prediction mini-chart ── */}
+            <div style={{
+              marginBottom: 10,
+              paddingTop: 8,
+              borderTop: "1px solid #e5e7eb",
+            }}>
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                marginBottom: 6,
+              }}>
+                <div>
+                  <p style={{
+                    margin: 0,
+                    fontSize: 10,
+                    fontWeight: 800,
+                    letterSpacing: "0.05em",
+                    textTransform: "uppercase",
+                    color: "#6b7280",
+                  }}>
+                    AI Flood Prediction
+                  </p>
+                  <p style={{ margin: "1px 0 0", fontSize: 10, color: "#9ca3af" }}>
+                    Peak: <strong style={{ color: RISK_COLORS[activePredictedPeak] ?? "#6b7280" }}>
+                      {RISK_LABELS[activePredictedPeak] ?? "Unknown"}
+                    </strong>
+                  </p>
+                </div>
+                <div style={{
+                  display: "flex",
+                  gap: 2,
+                  padding: 2,
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 10,
+                  background: "#f9fafb",
+                }}>
+                  {(["weekly", "monthly"] as const).map((scale) => {
+                    const active = nodePredictionScale === scale;
+                    return (
+                      <button
+                        key={scale}
+                        type="button"
+                        onClick={() => setNodePredictionScale(scale)}
+                        style={{
+                          border: 0,
+                          borderRadius: 8,
+                          padding: "4px 7px",
+                          background: active ? "#2563eb" : "transparent",
+                          color: active ? "#ffffff" : "#6b7280",
+                          fontSize: 10,
+                          fontWeight: 700,
+                          textTransform: "capitalize",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {scale}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{
+                width: 270,
+                height: 124,
+                maxWidth: "100%",
+                border: "1px solid #edf0f3",
+                borderRadius: 12,
+                padding: "6px 2px 2px",
+                background: "#ffffff",
+              }}>
+                <FloodRiskChart
+                  data={activePredictionData}
+                  scale={nodePredictionScale}
+                  isDark={false}
+                  variant="line"
+                  height={112}
+                  showThresholds
+                />
+              </div>
+            </div>
+
+            {/* ── Address (reverse-geocoded) + raw coords ── */}
+            <div style={{
+              margin: "0 0 10px",
               paddingTop: 6, borderTop: "1px solid #e5e7eb",
             }}>
-              {activeNode.latitude.toFixed(6)}°N, {activeNode.longitude.toFixed(6)}°E
-            </p>
+              <p style={{ fontSize: 11, color: "#374151", margin: "0 0 4px", lineHeight: 1.35 }}>
+                <span style={{ color: "#6b7280" }}>Address: </span>
+                <span>
+                  {activeAddress === null
+                    ? "Resolving…"
+                    : activeAddress === "—"
+                      ? "Address unavailable"
+                      : activeAddress}
+                </span>
+              </p>
+              <p style={{ fontSize: 10, color: "#9ca3af", margin: 0 }}>
+                {activeNode.latitude.toFixed(6)}°N, {activeNode.longitude.toFixed(6)}°E
+                {activeNode.gps_fix === false ? " · estimated (no GPS fix)" : ""}
+              </p>
+            </div>
 
             {/* ── Favourite toggle button ── */}
             {onToggleFavourite && (() => {
@@ -580,6 +1084,99 @@ export default function NodeMap({
           </div>
         </InfoWindow>
       )}
+      {/* ── Searched place: pin + InfoWindow ───────────────────────────── */}
+      {searchedPlace && (
+        <>
+          <Marker
+            position={{ lat: searchedPlace.lat, lng: searchedPlace.lng }}
+            icon={{
+              // Blue teardrop to distinguish a searched address from a sensor pin.
+              path: "M 0,0 C -2,-20 -10,-22 -10,-30 A 10,10 0 1,1 10,-30 C 10,-22 2,-20 0,0 z",
+              fillColor: "#2563eb",
+              fillOpacity: 1,
+              strokeColor: "#1e3a8a",
+              strokeWeight: 1.5,
+              scale: 1.1,
+              anchor: new google.maps.Point(0, 0),
+            }}
+            zIndex={20}
+            onClick={() => setSearchedPlaceClicked((p) => !p)}
+          />
+          {searchedPlaceClicked && (() => {
+            // Count sensors within a default radius so the admin sees
+            // immediately how many flood pins surround the chosen address.
+            // Same haversine formula the saved-places panel uses.
+            const R_M = 6371_000;
+            const toRad = (d: number) => (d * Math.PI) / 180;
+            const radiusKm = 3;
+            const counts = nodes.reduce(
+              (acc, n) => {
+                const dLat = toRad(n.latitude - searchedPlace.lat);
+                const dLng = toRad(n.longitude - searchedPlace.lng);
+                const a =
+                  Math.sin(dLat / 2) ** 2 +
+                  Math.cos(toRad(searchedPlace.lat)) *
+                    Math.cos(toRad(n.latitude)) *
+                    Math.sin(dLng / 2) ** 2;
+                const dM = 2 * R_M * Math.asin(Math.sqrt(a));
+                if (dM > radiusKm * 1000) return acc;
+                acc.total++;
+                if (n.is_dead) acc.offline++;
+                else if (n.current_level >= 3) acc.critical++;
+                else if (n.current_level === 2) acc.warning++;
+                else if (n.current_level === 1) acc.alert++;
+                else acc.normal++;
+                return acc;
+              },
+              { total: 0, normal: 0, alert: 0, warning: 0, critical: 0, offline: 0 },
+            );
+            return (
+              <InfoWindow
+                position={{ lat: searchedPlace.lat, lng: searchedPlace.lng }}
+                onCloseClick={() => setSearchedPlaceClicked(false)}
+                options={{
+                  pixelOffset: new google.maps.Size(0, -34),
+                  disableAutoPan: false,
+                }}
+              >
+                <div style={{ minWidth: 240, padding: "2px 2px 4px", fontFamily: "inherit" }}>
+                  <p style={{
+                    fontWeight: 700, fontSize: 13, color: "#1a1a1a",
+                    margin: 0, marginBottom: 4,
+                  }}>
+                    {searchedPlace.name}
+                  </p>
+                  {searchedPlace.address && (
+                    <p style={{ fontSize: 11, color: "#6b7280", margin: 0, marginBottom: 8, lineHeight: 1.4 }}>
+                      {searchedPlace.address}
+                    </p>
+                  )}
+                  <div style={{
+                    background: "#f3f4f6", borderRadius: 8,
+                    padding: "6px 8px", marginBottom: 6, fontSize: 11, color: "#374151",
+                  }}>
+                    <strong>{counts.total}</strong> sensor{counts.total === 1 ? "" : "s"} within {radiusKm} km
+                    {counts.total > 0 && (
+                      <>
+                        {" · "}
+                        <span style={{ color: "#16a34a" }}>{counts.normal} normal</span>
+                        {counts.alert > 0 && <>{" · "}<span style={{ color: "#f59e0b" }}>{counts.alert} alert</span></>}
+                        {counts.warning > 0 && <>{" · "}<span style={{ color: "#f97316" }}>{counts.warning} warning</span></>}
+                        {counts.critical > 0 && <>{" · "}<span style={{ color: "#dc2626" }}>{counts.critical} critical</span></>}
+                        {counts.offline > 0 && <>{" · "}<span style={{ color: "#94a3b8" }}>{counts.offline} offline</span></>}
+                      </>
+                    )}
+                  </div>
+                  <p style={{ fontSize: 10, color: "#9ca3af", margin: 0 }}>
+                    {searchedPlace.lat.toFixed(6)}°N, {searchedPlace.lng.toFixed(6)}°E
+                  </p>
+                </div>
+              </InfoWindow>
+            );
+          })()}
+        </>
+      )}
     </GoogleMap>
+    </div>
   );
 }

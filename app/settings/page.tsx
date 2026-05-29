@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { toast, Toaster } from "react-hot-toast";
 
 import { useAuth } from "@/lib/AuthContext";
-import { authFetchJson } from "@/lib/authFetch";
 import { useTheme } from "@/lib/ThemeContext";
+import { useLanguage, LANGUAGE_CHANGED_EVENT } from "@/lib/i18n/LanguageContext";
+import { LOCALE_LABELS, type TranslationKey } from "@/lib/i18n/translations";
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -49,26 +50,10 @@ function SecurityIcon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-function AppearanceIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9c.83 0 1.5-.67 1.5-1.5 0-.39-.15-.74-.39-1.01-.23-.26-.38-.61-.38-.99 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-4.42-4.03-8-9-8zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 9 6.5 9 8 9.67 8 10.5 7.33 12 6.5 12zm3-4C8.67 8 8 7.33 8 6.5S8.67 5 9.5 5s1.5.67 1.5 1.5S10.33 8 9.5 8zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 5 14.5 5s1.5.67 1.5 1.5S15.33 8 14.5 8zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 9 17.5 9s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z" />
-    </svg>
-  );
-}
-
 function MapSettingsIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
       <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z" />
-    </svg>
-  );
-}
-
-function BackupIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" {...props}>
-      <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z" />
     </svg>
   );
 }
@@ -81,9 +66,7 @@ type SettingsTab =
   | "data"
   | "integrations"
   | "security"
-  | "appearance"
-  | "map"
-  | "backup";
+  | "map";
 
 type CRMSettings = {
   systemName: string;
@@ -177,14 +160,23 @@ const tabs: { id: SettingsTab; label: string; icon: React.ComponentType<React.SV
   { id: "data", label: "Data Management", icon: DataIcon },
   { id: "integrations", label: "Integrations", icon: IntegrationIcon },
   { id: "security", label: "Security", icon: SecurityIcon },
-  { id: "appearance", label: "Appearance", icon: AppearanceIcon },
   { id: "map", label: "Map Settings", icon: MapSettingsIcon },
-  { id: "backup", label: "Backup & Restore", icon: BackupIcon },
 ];
+
+// Tab id → translation key (label falls back to English via t()).
+const TAB_LABEL_KEY: Record<SettingsTab, TranslationKey> = {
+  general: "settings.tab.general",
+  notifications: "settings.tab.notifications",
+  data: "settings.tab.data",
+  integrations: "settings.tab.integrations",
+  security: "settings.tab.security",
+  map: "settings.tab.map",
+};
 
 export default function SettingsPage() {
   const { isDark } = useTheme();
-  const { accessToken, silentRefresh } = useAuth();
+  const { silentRefresh } = useAuth();
+  const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
   const [settings, setSettings] = useState<CRMSettings>(defaultSettings);
   const [originalSettings, setOriginalSettings] = useState<CRMSettings>(defaultSettings);
@@ -192,11 +184,22 @@ export default function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    const savedSettings = localStorage.getItem("crmSettings");
-    if (savedSettings) {
-      const parsed = JSON.parse(savedSettings);
-      setSettings(parsed);
-      setOriginalSettings(parsed);
+    try {
+      const savedSettings = localStorage.getItem("crmSettings");
+      if (!savedSettings) return;
+      const parsed = JSON.parse(savedSettings) as Partial<CRMSettings>;
+      // Merge over defaults so a blob persisted before a field existed
+      // (schema evolution, e.g. `language` added later) still hydrates
+      // every control with a defined value — and an old blob can't leave
+      // a <select>/<input> uncontrolled. Two independent copies so edits
+      // to `settings` never mutate `originalSettings`.
+      const hydrated: CRMSettings = { ...defaultSettings, ...parsed };
+      setSettings({ ...hydrated });
+      setOriginalSettings({ ...hydrated });
+    } catch {
+      // Corrupt / unparseable blob — drop it and fall back to defaults
+      // (already the initial state) so the page never crashes on load.
+      try { localStorage.removeItem("crmSettings"); } catch { /* ignore */ }
     }
   }, []);
 
@@ -209,23 +212,39 @@ export default function SettingsPage() {
   };
 
   const handleSave = async () => {
+    // The Save buttons are disabled while `isSaving`, so this early guard
+    // is belt-and-braces against a programmatic / rapid double-submit.
+    if (isSaving) return;
     setIsSaving(true);
+    // Intentional ~800 ms latency so the operator gets explicit "Saving…"
+    // feedback before the success toast (a synchronous localStorage write
+    // would otherwise feel like nothing happened).
     await new Promise((resolve) => setTimeout(resolve, 800));
     localStorage.setItem("crmSettings", JSON.stringify(settings));
-    setOriginalSettings(settings);
+    setOriginalSettings({ ...settings });
     setIsSaving(false);
+    // Broadcast so LanguageProvider re-reads the locale and the whole
+    // UI (sidebar, top bar, footer, this page) switches language live.
+    window.dispatchEvent(new Event(LANGUAGE_CHANGED_EVENT));
     toast.success("Settings saved successfully!");
   };
 
   const handleCancel = () => {
-    setSettings(originalSettings);
+    // Discard pending edits: clean-copy the last saved snapshot back into
+    // the active form so `hasChanges` recomputes to false and the form
+    // locks again.
+    setSettings({ ...originalSettings });
     toast("Changes reverted.", { icon: "↩️" });
   };
 
   const handleReset = () => {
-    setSettings(defaultSettings);
-    setOriginalSettings(defaultSettings);
+    // Hard factory reset: independent copies of the defaults into both
+    // states (never share the module-level constant), clear persistence,
+    // re-broadcast i18n so the locale snaps back live, no reload needed.
+    setSettings({ ...defaultSettings });
+    setOriginalSettings({ ...defaultSettings });
     localStorage.removeItem("crmSettings");
+    window.dispatchEvent(new Event(LANGUAGE_CHANGED_EVENT));
     toast.success("Settings reset to defaults!");
   };
 
@@ -241,21 +260,27 @@ export default function SettingsPage() {
     toast.success("Settings exported!");
   };
 
-  const handleBackupNow = () => {
-    // UX-SETTINGS01: server-side backup not yet implemented — use export as workaround
-    toast("Backup not yet available. Use Export to download a local copy.", { icon: "ℹ️" });
-  };
-
   const handleTestConnection = async (service: string) => {
     const toastId = toast.loading(`Testing ${service} connection…`);
     try {
       if (service === "Java API") {
-        if (!accessToken) {
-          toast.error("Sign in to test the Java API connection through the CRM.", { id: toastId });
-          return;
+        // Hit the BFF /api/nodes using the httpOnly auth cookie
+        // (credentials:include) — /api/nodes reads it via bffToken. On a
+        // 401/403 we silent-refresh once (rotating the cookie) and retry,
+        // so an expired access token self-heals. Decoupled from the
+        // in-memory accessToken, which is null on the cookie session and
+        // previously made this test always say "sign in".
+        const ping = () => fetch("/api/nodes", { cache: "no-store", credentials: "include" });
+        let res = await ping();
+        if (res.status === 401 || res.status === 403) {
+          await silentRefresh();
+          res = await ping();
         }
-        await authFetchJson<{ success: boolean; data?: unknown }>("/api/nodes", accessToken, silentRefresh);
-        toast.success("Java API responded successfully (BFF to backend path is working).", { id: toastId });
+        if (res.ok) {
+          toast.success("Java API responded successfully (BFF → backend path is working).", { id: toastId });
+        } else {
+          toast.error(`Java API connection failed (HTTP ${res.status}).`, { id: toastId });
+        }
         return;
       }
       const res = await fetch("/api/health", { cache: "no-store" });
@@ -272,7 +297,7 @@ export default function SettingsPage() {
     }
   };
 
-  const ActiveIcon = tabs.find((t) => t.id === activeTab)?.icon || GeneralIcon;
+  const ActiveIcon = tabs.find((tab) => tab.id === activeTab)?.icon || GeneralIcon;
 
   // Common input class based on theme
   const inputClass = `mt-1 w-full rounded-xl border px-4 py-2.5 text-sm outline-none transition-colors focus:border-primary-blue focus:ring-2 focus:ring-primary-blue/20 ${
@@ -291,35 +316,37 @@ export default function SettingsPage() {
 
       <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className={`text-3xl font-semibold transition-colors ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>CRM Settings</h1>
+          <h1 className={`text-3xl font-semibold transition-colors ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>{t("nav.settings")}</h1>
           <p className={`text-sm transition-colors ${isDark ? "text-dark-text-secondary" : "text-dark-charcoal/70"}`}>
-            Configure system preferences, integrations, and security options.
+            {t("settings.subtitle")}
           </p>
         </div>
         <div className="flex items-center gap-3">
           {hasChanges && (
-            <span className="rounded-full bg-status-warning-1/20 px-3 py-1 text-xs font-semibold text-status-warning-1">
-              Unsaved changes
+            <span data-cy="settings-unsaved" className="rounded-full bg-status-warning-1/20 px-3 py-1 text-xs font-semibold text-status-warning-1">
+              {t("settings.unsaved")}
             </span>
           )}
           <button
             type="button"
             onClick={handleExportSettings}
+            data-cy="settings-export"
             className={`rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${
               isDark
                 ? "border-dark-border text-dark-text hover:bg-dark-bg"
                 : "border-light-grey text-dark-charcoal hover:bg-very-light-grey"
             }`}
           >
-            Export
+            {t("settings.export")}
           </button>
           <button
             type="button"
             onClick={handleSave}
             disabled={!hasChanges || isSaving}
+            data-cy="settings-save"
             className="rounded-xl bg-primary-blue px-5 py-2.5 text-sm font-semibold text-pure-white transition hover:bg-primary-blue/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isSaving ? "Saving..." : "Save Changes"}
+            {isSaving ? t("settings.saving") : t("settings.save")}
           </button>
         </div>
       </header>
@@ -348,7 +375,7 @@ export default function SettingsPage() {
                 }`}
               >
                 <Icon className="h-5 w-5" />
-                {tab.label}
+                {t(TAB_LABEL_KEY[tab.id])}
               </button>
             );
           })}
@@ -364,17 +391,15 @@ export default function SettingsPage() {
             </div>
             <div>
               <h2 className={`text-lg font-semibold transition-colors ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>
-                {tabs.find((t) => t.id === activeTab)?.label}
+                {t(TAB_LABEL_KEY[activeTab])}
               </h2>
               <p className={subLabelClass}>
-                {activeTab === "general" && "Basic system configuration"}
+                {activeTab === "general" && t("settings.general.desc")}
                 {activeTab === "notifications" && "Alert and notification preferences"}
                 {activeTab === "data" && "Data retention and export settings"}
                 {activeTab === "integrations" && "Third-party service connections"}
                 {activeTab === "security" && "Access control and authentication"}
-                {activeTab === "appearance" && "Theme and display options"}
                 {activeTab === "map" && "Map display and default location"}
-                {activeTab === "backup" && "Backup scheduling and restoration"}
               </p>
             </div>
           </div>
@@ -384,16 +409,17 @@ export default function SettingsPage() {
             <div className="space-y-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className={labelClass}>System Name</label>
+                  <label className={labelClass}>{t("settings.field.systemName")}</label>
                   <input
                     type="text"
                     value={settings.systemName}
                     onChange={(e) => handleChange("systemName", e.target.value)}
+                    data-cy="settings-system-name"
                     className={inputClass}
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>Organization Name</label>
+                  <label className={labelClass}>{t("settings.field.organizationName")}</label>
                   <input
                     type="text"
                     value={settings.organizationName}
@@ -402,7 +428,7 @@ export default function SettingsPage() {
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>Timezone</label>
+                  <label className={labelClass}>{t("settings.field.timezone")}</label>
                   <select
                     value={settings.timezone}
                     onChange={(e) => handleChange("timezone", e.target.value)}
@@ -415,20 +441,21 @@ export default function SettingsPage() {
                   </select>
                 </div>
                 <div>
-                  <label className={labelClass}>Language</label>
+                  <label className={labelClass}>{t("settings.field.language")}</label>
                   <select
                     value={settings.language}
                     onChange={(e) => handleChange("language", e.target.value)}
                     className={inputClass}
                   >
-                    <option value="en-MY">English (Malaysia)</option>
-                    <option value="ms-MY">Bahasa Melayu</option>
-                    <option value="zh-CN">中文 (简体)</option>
-                    <option value="ta-IN">தமிழ்</option>
+                    {Object.entries(LOCALE_LABELS).map(([code, label]) => (
+                      <option key={code} value={code}>
+                        {label}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div>
-                  <label className={labelClass}>Date Format</label>
+                  <label className={labelClass}>{t("settings.field.dateFormat")}</label>
                   <select
                     value={settings.dateFormat}
                     onChange={(e) => handleChange("dateFormat", e.target.value)}
@@ -489,6 +516,10 @@ export default function SettingsPage() {
               </div>
               <div>
                 <h3 className={`text-sm font-semibold ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Alert Preferences</h3>
+                <p className={`mt-1 ${subLabelClass}`}>
+                  The Critical / Warning toggles control the on-screen alert pop-up, sound, and
+                  desktop notification. Suppressed alerts still appear in the notification bell.
+                </p>
                 <div className="mt-3 space-y-3">
                   <label className="flex items-center gap-3">
                     <input
@@ -497,7 +528,7 @@ export default function SettingsPage() {
                       onChange={(e) => handleChange("dangerAlertEmail", e.target.checked)}
                       className="h-4 w-4 rounded border-light-grey text-primary-blue focus:ring-primary-blue/40"
                     />
-                    <span className={`text-sm ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Email for Critical-level alerts</span>
+                    <span className={`text-sm ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Pop-ups for Critical-level alerts</span>
                   </label>
                   <label className="flex items-center gap-3">
                     <input
@@ -506,7 +537,7 @@ export default function SettingsPage() {
                       onChange={(e) => handleChange("warningAlertEmail", e.target.checked)}
                       className="h-4 w-4 rounded border-light-grey text-primary-blue focus:ring-primary-blue/40"
                     />
-                    <span className={`text-sm ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Email for Warning-level alerts</span>
+                    <span className={`text-sm ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Pop-ups for Warning-level alerts</span>
                   </label>
                   <label className="flex items-center gap-3">
                     <input
@@ -561,6 +592,7 @@ export default function SettingsPage() {
                       type="checkbox"
                       checked={settings.liveDataEnabled}
                       onChange={(e) => handleChange("liveDataEnabled", e.target.checked)}
+                      data-cy="settings-live-mode"
                       className="h-5 w-5 rounded border-light-grey text-primary-blue focus:ring-primary-blue/40"
                     />
                   </label>
@@ -597,7 +629,7 @@ export default function SettingsPage() {
                       ];
 
                       return (
-                        <div className={`mt-2 space-y-3 ${isDisabled ? "opacity-50 pointer-events-none" : ""}`}>
+                        <div data-cy="settings-refresh-block" className={`mt-2 space-y-3 ${isDisabled ? "opacity-50 pointer-events-none" : ""}`}>
                           {/* Number input + unit label */}
                           <div className="flex items-center gap-2">
                             <input
@@ -611,6 +643,7 @@ export default function SettingsPage() {
                                 if (!isNaN(v)) handleChange("refreshInterval", v * 1000);
                               }}
                               disabled={isDisabled}
+                              data-cy="settings-refresh-input"
                               className={`${inputClass} w-32 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none ${
                                 isInvalid ? "border-status-danger focus:ring-status-danger/20" : ""
                               }`}
@@ -744,6 +777,7 @@ export default function SettingsPage() {
                     <button
                       type="button"
                       onClick={() => handleTestConnection("Google Maps")}
+                      data-cy="settings-test-maps"
                       className={`rounded-xl border px-4 py-2 text-sm font-semibold text-primary-blue transition ${isDark ? "border-primary-blue hover:bg-primary-blue/20" : "border-primary-blue hover:bg-light-blue/20"}`}
                     >
                       Test
@@ -773,6 +807,7 @@ export default function SettingsPage() {
                     <button
                       type="button"
                       onClick={() => handleTestConnection("Java API")}
+                      data-cy="settings-test-java"
                       className={`rounded-xl border px-4 py-2 text-sm font-semibold text-primary-blue transition ${isDark ? "border-primary-blue hover:bg-primary-blue/20" : "border-primary-blue hover:bg-light-blue/20"}`}
                     >
                       Test
@@ -869,83 +904,6 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* Appearance Tab */}
-          {activeTab === "appearance" && (
-            <div className="space-y-5">
-              <div>
-                <label className={labelClass}>Theme</label>
-                <div className="mt-2 flex gap-3">
-                  {["light", "dark", "system"].map((theme) => (
-                    <button
-                      key={theme}
-                      type="button"
-                      onClick={() => handleChange("theme", theme)}
-                      className={`rounded-xl px-5 py-2.5 text-sm font-semibold capitalize transition ${
-                        settings.theme === theme
-                          ? "bg-primary-blue text-pure-white"
-                          : isDark
-                            ? "border border-dark-border text-dark-text hover:border-primary-blue/60"
-                            : "border border-light-grey text-dark-charcoal hover:border-primary-blue/60"
-                      }`}
-                    >
-                      {theme}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <label className={labelClass}>Primary Color</label>
-                <div className="mt-2 flex items-center gap-3">
-                  <input
-                    type="color"
-                    value={settings.primaryColor}
-                    onChange={(e) => handleChange("primaryColor", e.target.value)}
-                    className={`h-10 w-16 cursor-pointer rounded-lg border ${isDark ? "border-dark-border" : "border-light-grey"}`}
-                  />
-                  <input
-                    type="text"
-                    value={settings.primaryColor}
-                    onChange={(e) => handleChange("primaryColor", e.target.value)}
-                    className={`${inputClass} w-32`}
-                  />
-                </div>
-              </div>
-              <div>
-                <label className={labelClass}>Sidebar Position</label>
-                <div className="mt-2 flex gap-3">
-                  {["left", "right"].map((pos) => (
-                    <button
-                      key={pos}
-                      type="button"
-                      onClick={() => handleChange("sidebarPosition", pos)}
-                      className={`rounded-xl px-5 py-2.5 text-sm font-semibold capitalize transition ${
-                        settings.sidebarPosition === pos
-                          ? "bg-primary-blue text-pure-white"
-                          : isDark
-                            ? "border border-dark-border text-dark-text hover:border-primary-blue/60"
-                            : "border border-light-grey text-dark-charcoal hover:border-primary-blue/60"
-                      }`}
-                    >
-                      {pos}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <label className={`flex items-center justify-between ${cardClass}`}>
-                <div>
-                  <p className={`font-medium ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Compact Mode</p>
-                  <p className={subLabelClass}>Reduce spacing for more content</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={settings.compactMode}
-                  onChange={(e) => handleChange("compactMode", e.target.checked)}
-                  className="h-5 w-5 rounded border-light-grey text-primary-blue focus:ring-primary-blue/40"
-                />
-              </label>
-            </div>
-          )}
-
           {/* Map Settings Tab */}
           {activeTab === "map" && (
             <div className="space-y-5">
@@ -1018,132 +976,41 @@ export default function SettingsPage() {
             </div>
           )}
 
-          {/* Backup Tab */}
-          {activeTab === "backup" && (
-            <div className="space-y-5">
-              <p className="rounded-xl border border-status-warning-1/40 bg-status-warning-1/10 px-4 py-2.5 text-xs font-medium text-status-warning-1">
-                (Saved locally — server enforcement not yet active)
-              </p>
-              <label className={`flex items-center justify-between ${cardClass}`}>
-                <div>
-                  <p className={`font-medium ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Automatic Backups</p>
-                  <p className={subLabelClass}>Schedule regular data backups</p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={settings.autoBackup}
-                  onChange={(e) => handleChange("autoBackup", e.target.checked)}
-                  className="h-5 w-5 rounded border-light-grey text-primary-blue focus:ring-primary-blue/40"
-                />
-              </label>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div>
-                  <label className={labelClass}>Backup Frequency</label>
-                  <select
-                    value={settings.backupFrequency}
-                    onChange={(e) => handleChange("backupFrequency", e.target.value)}
-                    disabled={!settings.autoBackup}
-                    className={`${inputClass} disabled:opacity-50`}
-                  >
-                    <option value="hourly">Hourly</option>
-                    <option value="daily">Daily</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="monthly">Monthly</option>
-                  </select>
-                </div>
-                <div>
-                  <label className={labelClass}>Retention Period</label>
-                  <div className="mt-1 flex items-center gap-3">
-                    <input
-                      type="number"
-                      value={settings.backupRetention}
-                      onChange={(e) => handleChange("backupRetention", parseInt(e.target.value))}
-                      disabled={!settings.autoBackup}
-                      className={`${inputClass} disabled:opacity-50`}
-                    />
-                    <span className={`text-sm ${isDark ? "text-dark-text-secondary" : "text-dark-charcoal/70"}`}>days</span>
-                  </div>
-                </div>
-              </div>
-              <div className={cardClass}>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className={`font-semibold ${isDark ? "text-dark-text" : "text-dark-charcoal"}`}>Last Backup</p>
-                    <p className={subLabelClass}>
-                      {new Date(settings.lastBackup).toLocaleString("en-MY", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      })}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleBackupNow}
-                    className="rounded-xl bg-gray-300 px-4 py-2 text-sm font-semibold text-gray-500 cursor-not-allowed opacity-60"
-                    disabled
-                    title="Server-side backup coming soon"
-                  >
-                    Backup Now · Coming Soon
-                  </button>
-                </div>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <button
-                  type="button"
-                  disabled
-                  title="Coming soon"
-                  className={`rounded-xl border px-4 py-3 text-sm font-semibold opacity-50 cursor-not-allowed ${
-                    isDark
-                      ? "border-dark-border text-dark-text"
-                      : "border-light-grey text-dark-charcoal"
-                  }`}
-                >
-                  Download Backup · Coming Soon
-                </button>
-                <button
-                  type="button"
-                  disabled
-                  title="Coming soon"
-                  className="rounded-xl border border-status-warning-2 px-4 py-3 text-sm font-semibold text-status-warning-2 opacity-50 cursor-not-allowed"
-                >
-                  Restore from Backup · Coming Soon
-                </button>
-              </div>
-            </div>
-          )}
-
           {/* Action Buttons */}
           <div className={`mt-8 flex justify-end gap-3 border-t pt-6 ${isDark ? "border-dark-border" : "border-light-grey"}`}>
             <button
               type="button"
               onClick={handleReset}
+              data-cy="settings-reset"
               className={`rounded-xl border px-5 py-2.5 text-sm font-semibold transition ${
                 isDark
                   ? "border-dark-border text-dark-text hover:bg-dark-bg"
                   : "border-light-grey text-dark-charcoal hover:bg-very-light-grey"
               }`}
             >
-              Reset to Defaults
+              {t("settings.reset")}
             </button>
             <button
               type="button"
               onClick={handleCancel}
               disabled={!hasChanges}
+              data-cy="settings-cancel"
               className={`rounded-xl border px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${
                 isDark
                   ? "border-dark-border text-dark-text hover:bg-dark-bg"
                   : "border-light-grey text-dark-charcoal hover:bg-very-light-grey"
               }`}
             >
-              Cancel
+              {t("settings.cancel")}
             </button>
             <button
               type="button"
               onClick={handleSave}
               disabled={!hasChanges || isSaving}
+              data-cy="settings-save-footer"
               className="rounded-xl bg-primary-blue px-5 py-2.5 text-sm font-semibold text-pure-white transition hover:bg-primary-blue/90 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {isSaving ? "Saving..." : "Save Changes"}
+              {isSaving ? t("settings.saving") : t("settings.save")}
             </button>
           </div>
         </article>
