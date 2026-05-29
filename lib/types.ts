@@ -33,7 +33,11 @@ export type Zone = {
   lastUpdated?: string;
 };
 
-// Node type definition based on MongoDB schema
+// Node type definition based on MongoDB schema, extended with optional
+// raw-telemetry fields that the CRM operator console now surfaces in
+// the map InfoWindow (battery, signal, village, etc.).
+// Community-side renders never use these because they hydrate from the
+// privacy-aggregated /api/iot/zones route which strips them upstream.
 export interface NodeData {
   _id: string;
   node_id: string;
@@ -47,6 +51,44 @@ export interface NodeData {
   is_dead: boolean; // false = alive, true = dead
   last_updated: Date | string;
   created_at: Date | string;
+  // ── optional raw-telemetry fields (CRM-only, populated by
+  //    iotNodeToNodeData; undefined when the data source is the
+  //    privacy-aggregated /api/iot/zones route) ─────────────────────
+  village_id?: string;       // e.g. "SIM-PITAS-SOSOP" or real village id
+  battery_voltage?: number;  // volts, typical Li-Ion range 3.3-4.2
+  float_bits?: number;       // raw float-switch bitmask 0..7
+  rssi?: number;             // LoRa received signal strength dBm
+  snr?: number;              // LoRa signal-to-noise ratio dB
+  gps_fix?: boolean;         // whether lat/lng came from a live GPS lock
+  parent_id?: string;        // LoRa relay (master or upstream node)
+}
+
+/**
+ * Classify a LoRa node battery voltage into an operator-facing health band.
+ * Thresholds match the map InfoWindow so the whole CRM (Sensors, Map,
+ * Analytics, Dashboard) labels battery identically:
+ *   ≤ 0.5 V  → Dead/disconnected (sensor not reporting a real cell)
+ *   < 3.3 V  → Critical (replace soon)
+ *   < 3.6 V  → Low
+ *   ≥ 3.6 V  → Healthy
+ * `pct` is an indicative state-of-charge mapped over a 3.0–4.2 V Li-ion span.
+ */
+export type BatterySeverity = "healthy" | "low" | "critical" | "dead" | "unknown";
+
+export function getBatteryStatus(voltage: number | null | undefined): {
+  label: string;
+  hex: string;
+  severity: BatterySeverity;
+  pct: number | null;
+} {
+  if (typeof voltage !== "number" || !Number.isFinite(voltage)) {
+    return { label: "No data", hex: "#9ca3af", severity: "unknown", pct: null };
+  }
+  const pct = Math.max(0, Math.min(100, Math.round(((voltage - 3.0) / (4.2 - 3.0)) * 100)));
+  if (voltage <= 0.5) return { label: "Dead", hex: "#dc2626", severity: "dead", pct: 0 };
+  if (voltage < 3.3) return { label: "Critical", hex: "#ea580c", severity: "critical", pct };
+  if (voltage < 3.6) return { label: "Low", hex: "#f59e0b", severity: "low", pct };
+  return { label: "Healthy", hex: "#16a34a", severity: "healthy", pct };
 }
 
 // Helper function to determine water level status

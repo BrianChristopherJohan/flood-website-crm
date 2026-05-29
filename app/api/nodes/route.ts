@@ -2,7 +2,7 @@
 // GET /api/nodes
 //
 // BFF proxy — fetches sensor nodes from the Java Spring Boot API,
-// caches in Upstash Redis for 30 s, returns the NodeData shape.
+// caches in Redis for 30 s, returns the NodeData shape.
 //
 // LEGACY ROUTE NOTE (2026-05-18):
 //   The /map page no longer consumes this route — it pulls live
@@ -21,14 +21,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { javaFetch, type JavaSensorDto } from "@/lib/javaApi";
 import { withCache, CACHE_TTL } from "@/lib/redis";
+import { bffToken } from "@/lib/bffAuth";
 import type { NodeData } from "@/lib/types";
 
 export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get("authorization") ?? undefined;
-    const token = authHeader?.replace(/^Bearer\s+/i, "");
+    // Cookie-first token resolution (see lib/bffAuth). Keeps /analytics,
+    // /sensors etc. working after a reload when the client has no
+    // in-memory access token to put in the Authorization header.
+    const token = bffToken(req);
 
     const nodes = await withCache<NodeData[]>(
       "crm:nodes:all",
@@ -60,15 +63,14 @@ export async function GET(req: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("[/api/nodes] Error fetching from Java API:", error);
-    const status = (error as { status?: number }).status;
-    const httpStatus = status === 401 || status === 403 ? status : 500;
+    // Log only status + message (never the raw error object, which can
+    // carry the upstream response body). Don't echo internal messages
+    // to the client either.
+    const err = error as { status?: number; message?: string };
+    console.error(`[/api/nodes] upstream status=${err.status ?? "?"} msg=${err.message ?? ""}`);
+    const httpStatus = err.status === 401 || err.status === 403 ? err.status : 502;
     return NextResponse.json(
-      {
-        success: false,
-        error: "Failed to fetch nodes data",
-        message: error instanceof Error ? error.message : "Unknown error",
-      },
+      { success: false, error: "Failed to fetch nodes data" },
       { status: httpStatus }
     );
   }

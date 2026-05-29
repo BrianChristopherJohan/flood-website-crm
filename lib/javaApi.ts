@@ -92,10 +92,24 @@ async function javaFetchWithBase<T>(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    const err = new Error(`Java API ${method} ${p} → ${res.status}: ${text}`) as Error & {
+    // Extract only a human-readable message from the JSON body — never
+    // embed the raw upstream body in the thrown Error's message (it can
+    // contain stack traces / internal detail that would leak to the
+    // client). Spring Boot returns { message } or { error }. The raw
+    // body is kept on `err.rawBody` for server-side logging only.
+    let parsed: string | undefined;
+    try {
+      const json = JSON.parse(text);
+      parsed = json.message || json.error;
+    } catch {
+      /* not JSON — fall back to a generic, body-free message */
+    }
+    const err = new Error(parsed || `Java API ${method} ${p} → ${res.status}`) as Error & {
       status: number;
+      rawBody: string;
     };
     err.status = res.status;
+    err.rawBody = text;
     throw err;
   }
 

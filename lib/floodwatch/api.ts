@@ -21,8 +21,14 @@ export const FLOODWATCH_API_BASE = (
 ).replace(/\/$/, "");
 
 /**
- * Default dataset selector. Production traffic should always hit
- * `real`; toggle via FLOODWATCH_DATASET=sample for demo / dev mode.
+ * Default dataset selector — `real`.
+ *
+ * Per FloodWatch API docs: `dataset=real` returns "Live sensor data
+ * only — documents without `is_sample` flag". This is the canonical
+ * production data the CRM is supposed to show operators.
+ *
+ * If your hardware triggers but no fresh data appears here, the issue
+ * is upstream — the website only renders what the FastAPI returns.
  */
 export const DEFAULT_DATASET: Dataset =
   (process.env.FLOODWATCH_DATASET as Dataset) ?? "real";

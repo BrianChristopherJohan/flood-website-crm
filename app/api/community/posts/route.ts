@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { javaFetch } from "@/lib/javaApi";
+import { communityJavaFetch } from "@/lib/javaApi";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +33,10 @@ export async function GET(req: NextRequest) {
     if (group)  params.set("group",  encodeURIComponent(group));
     if (search) params.set("search", encodeURIComponent(search));
 
-    const data = await javaFetch<unknown>(`/community/posts?${params}`, { token });
+    // Community posts live in flood-service-community (flood_community DB),
+    // NOT the CRM's own backend. Use communityJavaFetch so the CRM
+    // moderation view shows the SAME feed as the community website.
+    const data = await communityJavaFetch<unknown>(`/community/posts?${params}`, { token });
     return NextResponse.json(data);
   } catch (error) {
     const status = (error as { status?: number }).status ?? 500;

@@ -77,6 +77,59 @@ function findMessageBoundary(
  * time downstream (mirroring how the community proxy is structured,
  * which simplifies future privacy hardening if needed).
  */
+/**
+ * Fire-and-forget Web Push dispatch for flood-level≥2 alerts.
+ *
+ * The CRM SSE proxy forwards the same upstream IoT events the community
+ * proxy does. To make sure operators get OS-level push even when the
+ * CRM tab is closed, we fire a dispatch from BOTH apps. The
+ * community-side /api/push/dispatch endpoint owns the Java subscription
+ * list + the Redis dedupe, so cross-app duplicate dispatches collapse
+ * to a single push at the dedupe layer (5-min cooldown per
+ * `{nodeId, alertType}`).
+ *
+ * The dispatch URL lives on the COMMUNITY Vercel project — the Java
+ * subscriptions are persisted there. CRM POSTs cross-domain
+ * fire-and-forget. The endpoint is auth-free (see its route comment
+ * for the rationale).
+ */
+function maybeFirePush(eventName: string, payload: Record<string, unknown>): void {
+  if (eventName !== "alert") return;
+  const alertType = typeof payload.alert_type === "string" ? payload.alert_type : null;
+  const level = typeof payload.level === "number" ? payload.level : 0;
+  const shouldPush =
+    (alertType === "flood" && level >= 2) ||
+    alertType === "battery_critical" ||
+    (alertType === "water_fall" && level >= 2);
+  if (!shouldPush) return;
+
+  const nodeId = typeof payload.node_id === "string" ? payload.node_id : null;
+  if (!nodeId) return;
+
+  const communityBase =
+    process.env.NEXT_PUBLIC_COMMUNITY_URL ?? "https://flood-website-community.vercel.app";
+  const dispatchUrl = `${communityBase.replace(/\/$/, "")}/api/push/dispatch`;
+
+  fetch(dispatchUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      nodeId,
+      villageId: typeof payload.village_id === "string" ? payload.village_id : undefined,
+      alertType,
+      level,
+      timestamp:
+        typeof payload.timestamp === "string" ? payload.timestamp : new Date().toISOString(),
+      source: "crm" as const,
+    }),
+  }).catch((err) => {
+    console.warn(
+      "[crm/sse/iot-events] push dispatch fire-and-forget failed:",
+      err instanceof Error ? err.message : err,
+    );
+  });
+}
+
 function makeForwardTransform(): TransformStream<Uint8Array, Uint8Array> {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -88,6 +141,30 @@ function makeForwardTransform(): TransformStream<Uint8Array, Uint8Array> {
       while ((boundary = findMessageBoundary(buffer)) !== null) {
         const raw = buffer.slice(0, boundary.idx + boundary.sep);
         buffer = buffer.slice(boundary.idx + boundary.sep);
+
+        // Side-effect: fire-and-forget Web Push dispatch on alert
+        // events that meet the push threshold. The browser still
+        // gets the SSE message in-tab; this is the OS-level pathway.
+        try {
+          const text = decoder.decode(encoder.encode(raw));
+          const lines = text.split(/\r?\n/);
+          let eventName: string | null = null;
+          let dataLine: string | null = null;
+          for (const line of lines) {
+            if (eventName === null && line.startsWith("event:")) {
+              eventName = line.slice(6).trim();
+            } else if (dataLine === null && line.startsWith("data:")) {
+              dataLine = line.slice(5).trim();
+            }
+          }
+          if (eventName === "alert" && dataLine) {
+            const parsed = JSON.parse(dataLine) as Record<string, unknown>;
+            maybeFirePush(eventName, parsed);
+          }
+        } catch {
+          // Parse failure — forward to browser anyway, just no push.
+        }
+
         controller.enqueue(encoder.encode(raw));
       }
     },
@@ -107,12 +184,18 @@ export async function GET(req: Request) {
   const upstreamUrl = buildStreamUrl({ types, dataset });
 
   try {
+    // Bound the upstream connection to just under Vercel's 300 s
+    // maxDuration. Without a signal, a stalled upstream (no response, or
+    // a silent hang mid-stream) holds the serverless connection open
+    // until the platform kills it at 300 s. Aborting at 280 s lets us
+    // close gracefully; the browser EventSource then auto-reconnects.
     const upstream = await fetch(upstreamUrl, {
       headers: {
         Accept: "text/event-stream",
         "Cache-Control": "no-cache",
       },
       cache: "no-store",
+      signal: AbortSignal.timeout(280_000),
     });
 
     if (!upstream.ok) {

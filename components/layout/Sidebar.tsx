@@ -7,15 +7,34 @@ import { usePathname } from "next/navigation";
 import { crmNavIconMap } from "@/components/layout/crmNavIconMap";
 import { useTheme } from "@/lib/ThemeContext";
 import { usePermissions } from "@/lib/hooks/usePermissions";
+import type { AppNavIconKey } from "@/lib/permissions";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
+import type { TranslationKey } from "@/lib/i18n/translations";
 
 type SidebarProps = {
   isCollapsed: boolean;
+};
+
+// Map each nav icon key to its translation key. Falls back to the
+// item's English label if a key isn't listed here.
+const NAV_LABEL_KEY: Partial<Record<AppNavIconKey, TranslationKey>> = {
+  dashboard: "nav.dashboard",
+  sensors: "nav.sensors",
+  map: "nav.map",
+  analytics: "nav.analytics",
+  alerts: "nav.alerts",
+  community: "nav.community",
+  news: "nav.news",
+  roles: "nav.roles",
+  account: "nav.account",
+  settings: "nav.settings",
 };
 
 export default function Sidebar({ isCollapsed }: SidebarProps) {
   const pathname = usePathname();
   const { isDark } = useTheme();
   const { accessibleNavItems } = usePermissions();
+  const { t } = useLanguage();
 
   const mainItems = accessibleNavItems.filter((item) => item.section === "main");
   const managementItems = accessibleNavItems.filter((item) => item.section === "management");
@@ -23,6 +42,8 @@ export default function Sidebar({ isCollapsed }: SidebarProps) {
   const renderNavItem = (item: (typeof accessibleNavItems)[number]) => {
     const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
     const ItemIcon = crmNavIconMap[item.iconKey];
+    const labelKey = NAV_LABEL_KEY[item.iconKey];
+    const label = labelKey ? t(labelKey) : item.label;
 
     return (
       <Link
@@ -40,7 +61,7 @@ export default function Sidebar({ isCollapsed }: SidebarProps) {
               : "text-dark-charcoal hover:bg-light-blue/40 hover:text-primary-blue"
         )}
         aria-current={isActive ? "page" : undefined}
-        title={isCollapsed ? item.label : undefined}
+        title={isCollapsed ? label : undefined}
       >
         <ItemIcon
           className={clsx(
@@ -52,7 +73,7 @@ export default function Sidebar({ isCollapsed }: SidebarProps) {
                 : "text-dark-charcoal"
           )}
         />
-        {!isCollapsed && <span>{item.label}</span>}
+        {!isCollapsed && <span>{label}</span>}
       </Link>
     );
   };
@@ -88,7 +109,7 @@ export default function Sidebar({ isCollapsed }: SidebarProps) {
                   isDark ? "text-dark-text-muted" : "text-dark-charcoal/50"
                 )}
               >
-                Management
+                {t("nav.management")}
               </p>
             )}
 

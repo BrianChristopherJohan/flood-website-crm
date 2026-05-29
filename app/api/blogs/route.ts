@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { javaFetch } from "@/lib/javaApi";
-import { withCache, CACHE_TTL } from "@/lib/redis";
+import { communityJavaFetch } from "@/lib/javaApi";
+import { bffToken } from "@/lib/bffAuth";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// Public blog articles live in flood-service-community (flood_community DB) —
+// the same source the community website + mobile app read. The CRM manages
+// those articles, so every blog route must use communityJavaFetch, NOT the
+// CRM's own backend (which has no blog data). No server-side caching here:
+// this is a low-traffic admin page and stale lists would hide an operator's
+// own create/edit/delete for minutes.
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -14,10 +20,9 @@ export async function GET(req: NextRequest) {
 
     const cat = category && category !== "All" ? category : "all";
     const catParam = cat !== "all" ? `&category=${encodeURIComponent(cat)}` : "";
-    const cacheKey = `crm:blogs:${page}:${size}:${cat}`;
 
-    const data = await withCache(cacheKey, CACHE_TTL.blogs, () =>
-      javaFetch<unknown>(`/blogs?page=${page}&size=${size}${catParam}`),
+    const data = await communityJavaFetch<unknown>(
+      `/blogs?page=${page}&size=${size}${catParam}`,
     );
     return NextResponse.json(data);
   } catch (error) {
@@ -28,9 +33,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const token = req.headers.get("authorization")?.replace("Bearer ", "");
+    const token = bffToken(req);
     const body = await req.json();
-    const data = await javaFetch<unknown>("/blogs", { method: "POST", body, token });
+    const data = await communityJavaFetch<unknown>("/blogs", { method: "POST", body, token });
     return NextResponse.json(data, { status: 201 });
   } catch (error) {
     const status = (error as { status?: number }).status ?? 500;

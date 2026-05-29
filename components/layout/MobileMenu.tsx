@@ -7,10 +7,26 @@ import { usePathname } from "next/navigation";
 import { crmNavIconMap } from "@/components/layout/crmNavIconMap";
 import { useTheme } from "@/lib/ThemeContext";
 import { usePermissions } from "@/lib/hooks/usePermissions";
+import type { AppNavIconKey } from "@/lib/permissions";
+import { useLanguage } from "@/lib/i18n/LanguageContext";
+import type { TranslationKey } from "@/lib/i18n/translations";
 
 type MobileMenuProps = {
   isOpen: boolean;
   onClose: () => void;
+};
+
+const NAV_LABEL_KEY: Partial<Record<AppNavIconKey, TranslationKey>> = {
+  dashboard: "nav.dashboard",
+  sensors: "nav.sensors",
+  map: "nav.map",
+  analytics: "nav.analytics",
+  alerts: "nav.alerts",
+  community: "nav.community",
+  news: "nav.news",
+  roles: "nav.roles",
+  account: "nav.account",
+  settings: "nav.settings",
 };
 
 function CloseIcon(props: React.SVGProps<SVGSVGElement>) {
@@ -30,6 +46,7 @@ export default function MobileMenu({ isOpen, onClose }: MobileMenuProps) {
   const pathname = usePathname();
   const { isDark } = useTheme();
   const { accessibleNavItems } = usePermissions();
+  const { t } = useLanguage();
 
   const mainItems = accessibleNavItems.filter((item) => item.section === "main");
   const managementItems = accessibleNavItems.filter((item) => item.section === "management");
@@ -96,7 +113,7 @@ export default function MobileMenu({ isOpen, onClose }: MobileMenuProps) {
                 isDark ? "text-dark-text-muted" : "text-dark-charcoal/50"
               )}
             >
-              Main
+              {t("footer.main")}
             </p>
             <div className="space-y-1">
               {mainItems.map((item) => {
@@ -131,7 +148,11 @@ export default function MobileMenu({ isOpen, onClose }: MobileMenuProps) {
                             : "text-dark-charcoal"
                       )}
                     />
-                    <span>{item.label}</span>
+                    <span>
+                      {NAV_LABEL_KEY[item.iconKey]
+                        ? t(NAV_LABEL_KEY[item.iconKey] as TranslationKey)
+                        : item.label}
+                    </span>
                   </Link>
                 );
               })}
@@ -151,7 +172,7 @@ export default function MobileMenu({ isOpen, onClose }: MobileMenuProps) {
                     isDark ? "text-dark-text-muted" : "text-dark-charcoal/50"
                   )}
                 >
-                  Management
+                  {t("nav.management")}
                 </p>
                 <div className="space-y-1">
                   {managementItems.map((item) => {
@@ -186,7 +207,11 @@ export default function MobileMenu({ isOpen, onClose }: MobileMenuProps) {
                                 : "text-dark-charcoal"
                           )}
                         />
-                        <span>{item.label}</span>
+                        <span>
+                      {NAV_LABEL_KEY[item.iconKey]
+                        ? t(NAV_LABEL_KEY[item.iconKey] as TranslationKey)
+                        : item.label}
+                    </span>
                       </Link>
                     );
                   })}

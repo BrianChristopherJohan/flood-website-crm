@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { javaFetch } from "@/lib/javaApi";
+import { communityJavaFetch } from "@/lib/javaApi";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const data = await javaFetch<string[]>("/blogs/categories");
+    const data = await communityJavaFetch<string[]>("/blogs/categories");
     return NextResponse.json(Array.isArray(data) ? data : []);
   } catch (err: unknown) {
     const e = err as { message?: string; status?: number };

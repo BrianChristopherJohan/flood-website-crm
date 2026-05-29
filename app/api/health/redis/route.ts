@@ -1,8 +1,7 @@
-// GET /api/health/upstash
+// GET /api/health/redis
 //
-// Diagnostic endpoint for the SSO storage backend (now Railway Redis,
-// previously Upstash — the endpoint name is preserved for any external
-// bookmark / monitoring check that already polls this path).
+// Diagnostic endpoint for the Railway Redis backend that powers the SSO
+// handoff store + the server-side cache.
 //
 // Reports whether the Vercel deployment can actually talk to Redis,
 // and surfaces the upstream error verbatim if it can't.
