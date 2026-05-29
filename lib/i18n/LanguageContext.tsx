@@ -64,13 +64,7 @@ type LanguageContextType = {
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  // Start at the default so server and first client render agree, then
-  // reconcile to the stored value after mount (avoids hydration mismatch).
-  const [locale, setLocaleState] = useState<Locale>(DEFAULT_LOCALE);
-
-  useEffect(() => {
-    setLocaleState(readLocaleFromStorage());
-  }, []);
+  const [locale, setLocaleState] = useState<Locale>(() => readLocaleFromStorage());
 
   // Keep <html lang> aligned with the active locale.
   useEffect(() => {

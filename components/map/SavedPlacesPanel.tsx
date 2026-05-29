@@ -167,7 +167,7 @@ export default function SavedPlacesPanel({
   onPlacesChange,
   addRequest,
 }: SavedPlacesPanelProps) {
-  const [places, setPlaces] = useState<SavedPlace[]>([]);
+  const [places, setPlaces] = useState<SavedPlace[]>(() => loadSaved());
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<SavedPlace | null>(null);
   const [draftLabel, setDraftLabel] = useState("");
@@ -175,11 +175,6 @@ export default function SavedPlacesPanel({
   const [draftLng, setDraftLng] = useState<string>("");
   const [draftRadius, setDraftRadius] = useState<number>(3);
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-
-  // Hydrate from localStorage once on mount.
-  useEffect(() => {
-    setPlaces(loadSaved());
-  }, []);
 
   // Surface the list to the parent (map) so it can draw radius circles.
   // `onPlacesChange` must be a stable reference (e.g. a useState setter).
@@ -288,7 +283,10 @@ export default function SavedPlacesPanel({
   useEffect(() => {
     if (!addRequest || addRequest.nonce === lastAddNonce.current) return;
     lastAddNonce.current = addRequest.nonce;
-    openAddAt(addRequest.lat, addRequest.lng);
+    const id = window.setTimeout(() => {
+      openAddAt(addRequest.lat, addRequest.lng);
+    }, 0);
+    return () => window.clearTimeout(id);
   }, [addRequest, openAddAt]);
 
   const openEdit = useCallback((p: SavedPlace) => {
@@ -366,7 +364,7 @@ export default function SavedPlacesPanel({
         <div>
           <h2 className={`text-base font-semibold ${body}`}>My Saved Places</h2>
           <p className={`text-xs ${muted}`}>
-            Bookmark high-risk areas — we'll count nearby sensors so you can monitor coverage.
+            Bookmark high-risk areas — we&apos;ll count nearby sensors so you can monitor coverage.
             <span className="block">Tip: right-click anywhere on the map to drop a place.</span>
           </p>
         </div>
@@ -561,7 +559,7 @@ export default function SavedPlacesPanel({
               {editing ? "Edit saved place" : "Add saved place"}
             </h3>
             <p className={`mt-1 text-xs ${muted}`}>
-              We'll count sensors within your radius and update the badge live.
+              We&apos;ll count sensors within your radius and update the badge live.
             </p>
             <div className="mt-4 space-y-3">
               <label className="block">
