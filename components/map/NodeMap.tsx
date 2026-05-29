@@ -141,7 +141,8 @@ export default function NodeMap({
   // same pin again toggles it closed.
   const [clickedNodeId, setClickedNodeId] = useState<string | null>(null);
   const [nodePredictionScale, setNodePredictionScale] = useState<NodePredictionScale>("weekly");
-  const activeNodeId = clickedNodeId;
+  // Derived: clicked takes priority over hovered
+  const activeNodeId = clickedNodeId ?? hoveredNodeId;
   const [mapError, setMapError] = useState(false);
   const [lastFocusedNodeId, setLastFocusedNodeId] = useState<string | null>(null);
   const mapRef = useRef<google.maps.Map | null>(null);
