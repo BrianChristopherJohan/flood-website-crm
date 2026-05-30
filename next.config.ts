@@ -4,6 +4,7 @@ import type { NextConfig } from "next";
 // Vercel sets VERCEL=1 and manages its own output format — standalone must be off there.
 const nextConfig: NextConfig = {
   output: process.env.VERCEL ? undefined : "standalone",
+  outputFileTracingRoot: process.cwd(),
   turbopack: {
     root: process.cwd(),
   },
